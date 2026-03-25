@@ -65,8 +65,13 @@ async def list_persons(
     where_clause = ""
     params: list = []
     if search.strip():
-        where_clause = "WHERE p.name LIKE ?"
-        params.append(f"%{search.strip()}%")
+        term = search.strip()
+        if term.isdigit():
+            where_clause = "WHERE (p.id = ? OR p.name LIKE ?)"
+            params.extend([int(term), f"%{term}%"])
+        else:
+            where_clause = "WHERE p.name LIKE ?"
+            params.append(f"%{term}%")
 
     conn = get_db_connection()
     try:
