@@ -2,6 +2,7 @@ import {
   Component,
   ElementRef,
   OnDestroy,
+  WritableSignal,
   inject,
   input,
   output,
@@ -81,15 +82,17 @@ interface Slide {
           [style.z-index]="frontLayer() === 'a' ? 1 : 0"
         >
           @if (layerASlide(); as slide) {
-            @for (photo of slide.photos; track photo.path) {
-              <img
-                [src]="photo.path | imageUrl"
-                [alt]="photo.filename"
-                class="flex-1 min-w-0 h-full"
-                [class.object-contain]="slide.photos.length === 1 && !landscapeFill()"
-                [class.object-cover]="slide.photos.length > 1 || landscapeFill()"
-                (error)="onImageError($event, photo.path)"
-              />
+            @for (photo of slide.photos; track photo.path; let i = $index) {
+              <div class="flex-1 min-w-0 h-full overflow-hidden">
+                <img
+                  [src]="photo.path | imageUrl"
+                  [alt]="photo.filename"
+                  class="w-full h-full object-cover"
+                  [style.transform]="layerAImgTransforms()[i]"
+                  [style.transition]="layerAImgTransitions()[i]"
+                  (error)="onImageError($event, photo.path)"
+                />
+              </div>
             }
           }
         </div>
@@ -104,15 +107,17 @@ interface Slide {
           [style.z-index]="frontLayer() === 'b' ? 1 : 0"
         >
           @if (layerBSlide(); as slide) {
-            @for (photo of slide.photos; track photo.path) {
-              <img
-                [src]="photo.path | imageUrl"
-                [alt]="photo.filename"
-                class="flex-1 min-w-0 h-full"
-                [class.object-contain]="slide.photos.length === 1 && !landscapeFill()"
-                [class.object-cover]="slide.photos.length > 1 || landscapeFill()"
-                (error)="onImageError($event, photo.path)"
-              />
+            @for (photo of slide.photos; track photo.path; let i = $index) {
+              <div class="flex-1 min-w-0 h-full overflow-hidden">
+                <img
+                  [src]="photo.path | imageUrl"
+                  [alt]="photo.filename"
+                  class="w-full h-full object-cover"
+                  [style.transform]="layerBImgTransforms()[i]"
+                  [style.transition]="layerBImgTransitions()[i]"
+                  (error)="onImageError($event, photo.path)"
+                />
+              </div>
             }
           }
         </div>
@@ -255,17 +260,6 @@ export class SlideshowComponent implements OnDestroy {
     return isPhotoLandscape && isViewportPortrait;
   });
 
-  /** Use object-cover for landscape photos on landscape viewports to fill the screen. */
-  readonly landscapeFill = computed(() => {
-    const slide = this.currentSlide();
-    if (!slide || slide.photos.length !== 1) return false;
-    const photo = slide.photos[0];
-    if (!photo.image_width || !photo.image_height) return false;
-    const isPhotoLandscape = photo.image_width > photo.image_height;
-    const isViewportLandscape = this.viewportWidth() > this.viewportHeight();
-    return isPhotoLandscape && isViewportLandscape;
-  });
-
   /** Photo range for the current slide (1-based). */
   readonly photoCounter = computed(() => {
     const slides = this.slides();
@@ -291,6 +285,26 @@ export class SlideshowComponent implements OnDestroy {
   readonly layerBFilter = signal('none');
   readonly frontLayer = signal<'a' | 'b'>('a');
 
+  // Per-image Ken Burns transforms (independent motion per image)
+  readonly layerAImgTransforms = signal<string[]>([]);
+  readonly layerBImgTransforms = signal<string[]>([]);
+  readonly layerAImgTransitions = signal<string[]>([]);
+  readonly layerBImgTransitions = signal<string[]>([]);
+
+  private readonly kenBurnsPatterns: Array<{ start: string; end: string }> = [
+    // Zoom in + pan variations
+    { start: 'scale(1.0)', end: 'scale(1.06) translate(1.5%, 0.8%)' },
+    { start: 'scale(1.0)', end: 'scale(1.06) translate(-1.5%, -0.8%)' },
+    { start: 'scale(1.0)', end: 'scale(1.06) translate(-1.5%, 0.8%)' },
+    { start: 'scale(1.0)', end: 'scale(1.06) translate(1.5%, -0.8%)' },
+    // Zoom out + pan variations (start is set before crossfade while layer is invisible)
+    { start: 'scale(1.06) translate(1.5%, 0.8%)', end: 'scale(1.0)' },
+    { start: 'scale(1.06) translate(-1.5%, -0.8%)', end: 'scale(1.0)' },
+    { start: 'scale(1.06) translate(0%, 1.5%)', end: 'scale(1.0)' },
+    { start: 'scale(1.06) translate(0%, -1.5%)', end: 'scale(1.0)' },
+  ];
+  private kenBurnsPatternIndex = 0;
+
   /** True when the user prefers reduced motion (WCAG 2.2). */
   private readonly prefersReducedMotion = signal(
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -299,12 +313,10 @@ export class SlideshowComponent implements OnDestroy {
   /** Compute the animated transition CSS for the current transitionType. */
   private getAnimateTransition(): string {
     if (this.prefersReducedMotion()) return 'opacity 150ms ease';
-    const t = this.transitionType();
-    const dur = this.slideDuration();
-    switch (t) {
+    switch (this.transitionType()) {
       case 'slide': return 'transform 500ms ease, opacity 300ms ease';
       case 'zoom': return 'transform 500ms ease, opacity 400ms ease';
-      case 'kenburns': return `transform ${dur}s ease-out, opacity 300ms ease`;
+      case 'kenburns': return 'opacity 300ms ease';
       case 'fade_black': return 'opacity 400ms ease';
       case 'blur': return 'filter 400ms ease, opacity 400ms ease';
       case 'flip': return 'transform 500ms ease, opacity 250ms ease';
@@ -409,6 +421,9 @@ export class SlideshowComponent implements OnDestroy {
         this.layerASlide.set(slide);
         this.layerAOpacity.set(1);
         this.frontLayer.set('a');
+        const kbPatterns = this.pickKenBurnsPatterns(slide.photos.length);
+        this.initKenBurns(this.layerAImgTransforms, this.layerAImgTransitions, kbPatterns);
+        this.animateKenBurns(this.layerAImgTransforms, this.layerAImgTransitions, kbPatterns);
       }
 
       this.boundKeyHandler = (e: KeyboardEvent) => this.onKeyDown(e);
@@ -574,6 +589,41 @@ export class SlideshowComponent implements OnDestroy {
     });
   }
 
+  /** Pick N Ken Burns patterns from the cycle (one per image in the slide). */
+  private pickKenBurnsPatterns(count: number): Array<{ start: string; end: string }> {
+    const result: Array<{ start: string; end: string }> = [];
+    for (let i = 0; i < count; i++) {
+      result.push(this.kenBurnsPatterns[this.kenBurnsPatternIndex % this.kenBurnsPatterns.length]);
+      this.kenBurnsPatternIndex++;
+    }
+    return result;
+  }
+
+  /** Set Ken Burns start positions instantly (no transition). */
+  private initKenBurns(
+    imgTransforms: WritableSignal<string[]>,
+    imgTransitions: WritableSignal<string[]>,
+    patterns: Array<{ start: string; end: string }>,
+  ): void {
+    imgTransitions.set(patterns.map(() => 'none'));
+    imgTransforms.set(patterns.map(p => p.start));
+  }
+
+  /** Animate Ken Burns from current position to end position. */
+  private animateKenBurns(
+    imgTransforms: WritableSignal<string[]>,
+    imgTransitions: WritableSignal<string[]>,
+    patterns: Array<{ start: string; end: string }>,
+  ): void {
+    if (this.prefersReducedMotion()) return;
+    if (this.kenburnsTimer) clearTimeout(this.kenburnsTimer);
+    const dur = this.slideDuration();
+    imgTransitions.set(patterns.map(() => `transform ${dur}s ease-out`));
+    this.kenburnsTimer = setTimeout(() => {
+      imgTransforms.set(patterns.map(p => p.end));
+    }, 50);
+  }
+
   private crossfadeTo(slide: Slide): Promise<void> {
     // Cancel any in-progress crossfade and reset to clean state
     if (this.crossfadeTimer) {
@@ -596,6 +646,10 @@ export class SlideshowComponent implements OnDestroy {
       const activeTransform = isAFront ? this.layerATransform : this.layerBTransform;
       const activeTransition = isAFront ? this.layerATransition : this.layerBTransition;
       const activeFilter = isAFront ? this.layerAFilter : this.layerBFilter;
+      const standbyImgTransforms = isAFront ? this.layerBImgTransforms : this.layerAImgTransforms;
+      const standbyImgTransitions = isAFront ? this.layerBImgTransitions : this.layerAImgTransitions;
+      const activeImgTransforms = isAFront ? this.layerAImgTransforms : this.layerBImgTransforms;
+      const activeImgTransitions = isAFront ? this.layerAImgTransitions : this.layerBImgTransitions;
       const newFront: 'a' | 'b' = isAFront ? 'b' : 'a';
 
       const transition = this.transitionType();
@@ -611,13 +665,16 @@ export class SlideshowComponent implements OnDestroy {
       switch (transition) {
         case 'slide':   standbyTransform.set('translateX(100%)'); break;
         case 'zoom':    standbyTransform.set('scale(1.05)'); break;
-        case 'kenburns': standbyTransform.set('scale(1.0)'); break;
         case 'flip':    standbyTransform.set('perspective(1200px) rotateY(-90deg)'); break;
         default:        standbyTransform.set('none'); break;
       }
 
       // Load slide into standby layer (still invisible, still behind)
       standbySlide.set(slide);
+
+      // Set Ken Burns start positions on images (invisible — layer at opacity 0)
+      const kbPatterns = this.pickKenBurnsPatterns(slide.photos.length);
+      this.initKenBurns(standbyImgTransforms, standbyImgTransitions, kbPatterns);
 
       // 2. Wait one frame for DOM to paint the new content, then animate
       requestAnimationFrame(() => {
@@ -659,16 +716,12 @@ export class SlideshowComponent implements OnDestroy {
             activeTransition.set('none');
             activeTransform.set('none');
             activeFilter.set('none');
+            activeImgTransitions.set([]);
+            activeImgTransforms.set([]);
             this.crossfadeTimer = null;
 
-            // Start Ken Burns slow zoom on the new front layer
-            if (transition === 'kenburns') {
-              // Re-apply slow transition for the zoom
-              standbyTransition.set(`transform ${this.slideDuration()}s ease-out`);
-              this.kenburnsTimer = setTimeout(() => {
-                standbyTransform.set('scale(1.08)');
-              }, 50);
-            }
+            // Start per-image Ken Burns zoom+pan on the new front layer
+            this.animateKenBurns(standbyImgTransforms, standbyImgTransitions, kbPatterns);
 
             resolve();
           }, duration);
