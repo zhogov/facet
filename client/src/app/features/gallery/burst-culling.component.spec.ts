@@ -3,7 +3,7 @@ import { of, throwError } from 'rxjs';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ApiService } from '../../core/services/api.service';
 import { I18nService } from '../../core/services/i18n.service';
-import { BurstCullingComponent, IsKeptPipe, IsDecidedPipe, IsConfirmedPipe } from './burst-culling.component';
+import { BurstCullingComponent, IsKeptPipe, IsDecidedPipe, IsConfirmedPipe, IsPassingPipe, PassCountdownPipe } from './burst-culling.component';
 
 describe('BurstCullingComponent', () => {
   let component: BurstCullingComponent;
@@ -60,6 +60,10 @@ describe('BurstCullingComponent', () => {
       ],
     });
     component = TestBed.inject(BurstCullingComponent);
+  });
+
+  afterEach(() => {
+    component.ngOnDestroy();
   });
 
   describe('initial state', () => {
@@ -265,17 +269,107 @@ describe('BurstCullingComponent', () => {
     });
   });
 
-  describe('skipGroup', () => {
+  describe('skipGroup (pass with countdown)', () => {
     beforeEach(async () => {
+      jest.useFakeTimers();
       await (component as any).loadGroups();
     });
 
-    it('should add group to confirmedGroups without posting', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should add group to passingGroups with countdown of 5', () => {
       const group = component['groups']()[0];
       component['skipGroup'](group);
 
-      expect(component['confirmedGroups']().has('1_burst')).toBe(true);
+      expect(component['passingGroups']().has('1_burst')).toBe(true);
+      expect(component['passingGroups']().get('1_burst')).toBe(5);
       expect(mockApi.post).not.toHaveBeenCalled();
+    });
+
+    it('should not add group to confirmedGroups immediately', () => {
+      const group = component['groups']()[0];
+      component['skipGroup'](group);
+
+      expect(component['confirmedGroups']().has('1_burst')).toBe(false);
+    });
+
+    it('should decrement countdown every second', () => {
+      const group = component['groups']()[0];
+      component['skipGroup'](group);
+
+      jest.advanceTimersByTime(1000);
+      expect(component['passingGroups']().get('1_burst')).toBe(4);
+
+      jest.advanceTimersByTime(1000);
+      expect(component['passingGroups']().get('1_burst')).toBe(3);
+    });
+
+    it('should hide group after 5 seconds', () => {
+      const group = component['groups']()[0];
+      component['skipGroup'](group);
+
+      jest.advanceTimersByTime(5000);
+
+      // Group should be hidden (removed from visible groups)
+      expect(component['visibleGroups']().find(g => g.group_id === 1)).toBeUndefined();
+      // But still in groups
+      expect(component['groups']().find(g => g.group_id === 1)).toBeDefined();
+    });
+
+    it('should remove group from passingGroups after timeout', () => {
+      const group = component['groups']()[0];
+      component['skipGroup'](group);
+
+      jest.advanceTimersByTime(5000);
+
+      expect(component['passingGroups']().has('1_burst')).toBe(false);
+    });
+  });
+
+  describe('cancelPass', () => {
+    beforeEach(async () => {
+      jest.useFakeTimers();
+      await (component as any).loadGroups();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should remove group from passingGroups', () => {
+      const group = component['groups']()[0];
+      component['skipGroup'](group);
+      expect(component['passingGroups']().has('1_burst')).toBe(true);
+
+      component['cancelPass'](group);
+      expect(component['passingGroups']().has('1_burst')).toBe(false);
+    });
+
+    it('should keep group visible after cancel', () => {
+      const group = component['groups']()[0];
+      component['skipGroup'](group);
+
+      jest.advanceTimersByTime(2000);
+      component['cancelPass'](group);
+
+      // Group should still be visible
+      expect(component['visibleGroups']().find(g => g.group_id === 1)).toBeDefined();
+    });
+
+    it('should prevent auto-hide after cancel', () => {
+      const group = component['groups']()[0];
+      component['skipGroup'](group);
+
+      jest.advanceTimersByTime(2000);
+      component['cancelPass'](group);
+
+      // Advance past original timeout
+      jest.advanceTimersByTime(5000);
+
+      // Group should still be visible
+      expect(component['visibleGroups']().find(g => g.group_id === 1)).toBeDefined();
     });
   });
 
@@ -308,13 +402,17 @@ describe('BurstCullingComponent', () => {
     });
 
     it('should skip already confirmed groups', async () => {
-      const group = component['groups']()[0];
-      component['skipGroup'](group);
+      // Directly confirm group 1 (simulating a previously confirmed group)
+      component['confirmedGroups'].update(s => {
+        const next = new Set(s);
+        next.add('1_burst');
+        return next;
+      });
       mockApi.post.mockClear();
 
       await component['confirmAllRemaining']();
 
-      // Only group 2 should be posted (group 1 was already confirmed/skipped)
+      // Only group 2 should be posted (group 1 was already confirmed)
       expect(mockApi.post).toHaveBeenCalledTimes(1);
       expect(mockApi.post).toHaveBeenCalledWith('/culling-groups/confirm', expect.objectContaining({
         group_id: 2,
@@ -423,5 +521,41 @@ describe('IsConfirmedPipe', () => {
 
     expect(pipe.transform(burstGroup as any, confirmed)).toBe(true);
     expect(pipe.transform(similarGroup as any, confirmed)).toBe(false);
+  });
+});
+
+describe('IsPassingPipe', () => {
+  const pipe = new IsPassingPipe();
+
+  it('should return true when group is in passingGroups', () => {
+    const group = { group_id: 1, type: 'burst' as const, reason: '', photos: [], best_path: '', count: 0 };
+    const passing = new Map([['1_burst', 4]]);
+
+    expect(pipe.transform(group as any, passing)).toBe(true);
+  });
+
+  it('should return false when group is not in passingGroups', () => {
+    const group = { group_id: 2, type: 'similar' as const, reason: '', photos: [], best_path: '', count: 0 };
+    const passing = new Map([['1_burst', 4]]);
+
+    expect(pipe.transform(group as any, passing)).toBe(false);
+  });
+});
+
+describe('PassCountdownPipe', () => {
+  const pipe = new PassCountdownPipe();
+
+  it('should return countdown value for group in passingGroups', () => {
+    const group = { group_id: 1, type: 'burst' as const, reason: '', photos: [], best_path: '', count: 0 };
+    const passing = new Map([['1_burst', 3]]);
+
+    expect(pipe.transform(group as any, passing)).toBe(3);
+  });
+
+  it('should return 0 for group not in passingGroups', () => {
+    const group = { group_id: 2, type: 'similar' as const, reason: '', photos: [], best_path: '', count: 0 };
+    const passing = new Map([['1_burst', 3]]);
+
+    expect(pipe.transform(group as any, passing)).toBe(0);
   });
 });

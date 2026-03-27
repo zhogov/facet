@@ -404,4 +404,9 @@ export class App implements OnInit {
   protected togglePersonsSortDirection(): void {
     this.personsFilters.sortDirection.update(d => d === 'desc' ? 'asc' : 'desc');
   }
+
+  protected resetAllFilters(): void {
+    this.router.navigate(['/']);
+    this.store.resetFilters();
+  }
 }

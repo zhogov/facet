@@ -59,30 +59,27 @@ class CategoryFilter:
     def matches(self, photo_data: dict) -> bool:
         """Check if photo data matches all filter criteria.
 
-        Args:
-            photo_data: Dict with photo metrics and tags. Expected keys:
-                - tags: comma-separated string of tags
-                - face_count: int
-                - face_ratio: float (0-1)
-                - is_silhouette: int (0/1)
-                - is_group_portrait: int (0/1)
-                - is_monochrome: int (0/1)
-                - mean_luminance: float (0-1)
-                - iso: int or None
-                - shutter_speed: float (seconds) or None
-                - focal_length: float or None
-                - f_stop: float or None
+        Delegates to explain_mismatch — returns True when no mismatch is found.
+        """
+        return self.explain_mismatch(photo_data) is None
+
+    def explain_mismatch(self, photo_data: dict) -> dict | None:
+        """Return the first failing filter with context, or None if photo matches.
 
         Returns:
-            True if photo matches all filter criteria, False otherwise
+            None if photo matches all filters, or dict with:
+                - key: filter key (e.g. 'face_ratio_min', 'has_face', 'required_tags')
+                - required: the filter's required value
+                - actual: the photo's actual value
         """
-        # Empty filters = match everything (fallback category)
         if not self.filters:
-            return True
+            return None
+        return (self._check_numeric(photo_data)
+                or self._check_booleans(photo_data)
+                or self._check_tags(photo_data))
 
-        # Numeric range filters
-        # Note: If a filter constraint is defined but the actual value is None,
-        # the photo does NOT match (we can't verify the constraint)
+    def _check_numeric(self, photo_data: dict) -> dict | None:
+        """Check all numeric range filters, return first mismatch or None."""
         numeric_fields = {
             "face_ratio": photo_data.get("face_ratio"),
             "face_count": photo_data.get("face_count"),
@@ -96,20 +93,26 @@ class CategoryFilter:
         for field, actual in numeric_fields.items():
             min_val = self.filters.get(f"{field}_min")
             max_val = self.filters.get(f"{field}_max")
-
-            # If filter is defined but value is None, don't match
+            # Coerce to float — SQLite can return strings for numeric columns
+            try:
+                num_actual = float(actual) if actual is not None else None
+            except (ValueError, TypeError):
+                num_actual = None
             if min_val is not None:
-                if actual is None:
-                    return False
-                if actual < min_val:
-                    return False
+                if num_actual is None:
+                    return {"key": f"{field}_min", "required": min_val, "actual": None}
+                if num_actual < min_val:
+                    return {"key": f"{field}_min", "required": min_val, "actual": round(num_actual, 3)}
             if max_val is not None:
-                if actual is None:
-                    return False
-                if actual > max_val:
-                    return False
+                if num_actual is None:
+                    return {"key": f"{field}_max", "required": max_val, "actual": None}
+                if num_actual > max_val:
+                    return {"key": f"{field}_max", "required": max_val, "actual": round(num_actual, 3)}
 
-        # Boolean filters
+        return None
+
+    def _check_booleans(self, photo_data: dict) -> dict | None:
+        """Check all boolean filters, return first mismatch or None."""
         bool_mappings = {
             "has_face": lambda pd: (pd.get("face_count") or 0) > 0,
             "is_monochrome": lambda pd: bool(pd.get("is_monochrome", 0)),
@@ -122,32 +125,36 @@ class CategoryFilter:
             if required is not None:
                 actual = getter(photo_data)
                 if actual != required:
-                    return False
+                    return {"key": field, "required": required, "actual": actual}
 
-        # Tag filters
+        return None
+
+    def _check_tags(self, photo_data: dict) -> dict | None:
+        """Check required and excluded tag filters, return first mismatch or None."""
         required_tags = self.filters.get("required_tags", [])
         excluded_tags = self.filters.get("excluded_tags", [])
         match_mode = self.filters.get("tag_match_mode", "any")
 
-        if required_tags or excluded_tags:
-            # Parse photo tags
-            tags_str = photo_data.get("tags") or ""
-            photo_tags = [t.strip().lower() for t in tags_str.split(",") if t.strip()]
+        if not required_tags and not excluded_tags:
+            return None
 
-            # Check required tags
-            if required_tags:
-                required_lower = [t.lower() for t in required_tags]
-                if match_mode == "any":
-                    if not any(tag in photo_tags for tag in required_lower):
-                        return False
-                else:  # "all"
-                    if not all(tag in photo_tags for tag in required_lower):
-                        return False
+        tags_str = photo_data.get("tags") or ""
+        photo_tags = [t.strip().lower() for t in tags_str.split(",") if t.strip()]
 
-            # Check excluded tags
-            if excluded_tags:
-                excluded_lower = [t.lower() for t in excluded_tags]
-                if any(tag in photo_tags for tag in excluded_lower):
-                    return False
+        if required_tags:
+            required_lower = [t.lower() for t in required_tags]
+            if match_mode == "any":
+                if not any(tag in photo_tags for tag in required_lower):
+                    return {"key": "required_tags", "required": required_tags, "actual": []}
+            else:
+                missing = [t for t in required_lower if t not in photo_tags]
+                if missing:
+                    return {"key": "required_tags", "required": required_tags, "actual": [t for t in required_lower if t in photo_tags]}
 
-        return True
+        if excluded_tags:
+            excluded_lower = [t.lower() for t in excluded_tags]
+            matched_excluded = [t for t in excluded_lower if t in photo_tags]
+            if matched_excluded:
+                return {"key": "excluded_tags", "required": excluded_tags, "actual": matched_excluded}
+
+        return None

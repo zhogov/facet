@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, effect, OnInit, HostListener, DestroyRef, ElementRef, viewChild } from '@angular/core';
+import { Component, inject, signal, computed, effect, OnInit, HostListener, DestroyRef, ElementRef, viewChild, afterNextRender } from '@angular/core';
 import { Location } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
@@ -23,6 +23,7 @@ import { CategoryLabelPipe } from '../gallery/photo-tooltip.component';
 import { IsLensNamePipe } from '../../shared/pipes/is-lens-name.pipe';
 import { DownloadIconPipe } from '../../shared/pipes/download-icon.pipe';
 import { DownloadOption } from '../../shared/models/download.model';
+import { downloadAll } from '../../shared/utils/download';
 import { GalleryStore } from '../gallery/gallery.store';
 import * as L from 'leaflet';
 import { createLeafletMap } from '../../shared/leaflet';
@@ -88,9 +89,9 @@ import { createLeafletMap } from '../../shared/leaflet';
         }
 
         @if (downloadOptions().length > 1) {
-          <button mat-button [matMenuTriggerFor]="downloadMenu" [matTooltip]="'photo_detail.download' | translate">
-            <mat-icon>download</mat-icon>
-            {{ 'photo_detail.download' | translate }}
+          <button mat-button [matMenuTriggerFor]="downloadMenu" [disabled]="downloading()" [matTooltip]="'photo_detail.download' | translate">
+            @if (downloading()) { <mat-spinner diameter="18" class="!inline-block !align-baseline" /> } @else { <mat-icon>download</mat-icon> }
+            {{ downloading() ? ('photo_detail.downloading' | translate) : ('photo_detail.download' | translate) }}
           </button>
           <mat-menu #downloadMenu="matMenu">
             @for (opt of downloadOptions(); track opt.type + (opt.profile ?? '')) {
@@ -105,9 +106,9 @@ import { createLeafletMap } from '../../shared/leaflet';
             }
           </mat-menu>
         } @else {
-          <button mat-button (click)="download(p.path)" [matTooltip]="'photo_detail.download' | translate">
-            <mat-icon>download</mat-icon>
-            {{ 'photo_detail.download' | translate }}
+          <button mat-button (click)="download(p.path)" [disabled]="downloading()" [matTooltip]="'photo_detail.download' | translate">
+            @if (downloading()) { <mat-spinner diameter="18" class="!inline-block !align-baseline" /> } @else { <mat-icon>download</mat-icon> }
+            {{ downloading() ? ('photo_detail.downloading' | translate) : ('photo_detail.download' | translate) }}
           </button>
         }
       </div>
@@ -115,19 +116,29 @@ import { createLeafletMap } from '../../shared/leaflet';
       <!-- Main content: image + info -->
       <div class="flex flex-col lg:flex-row lg:h-[calc(100%-49px)] lg:overflow-hidden">
         <!-- Image panel -->
-        <div class="shrink-0 lg:h-auto lg:flex-1 flex items-center justify-center bg-black lg:min-h-0 relative">
+        <div #imagePanel class="shrink-0 lg:h-auto lg:flex-1 flex items-center justify-center bg-black lg:min-h-0 relative overflow-hidden cursor-grab"
+          [class.cursor-grabbing]="isPanning()"
+          (dblclick)="resetZoom()"
+          (pointerdown)="onPanStart($event)"
+          (pointermove)="onPanMove($event)"
+          (pointerup)="onPanEnd($event)"
+          (pointercancel)="onPanEnd($event)"
+          (touchstart)="onTouchStart($event)"
+          (touchend)="onTouchEnd()">
           <img
             [src]="p.path | thumbnailUrl:640"
             [alt]="p.filename"
-            class="w-full lg:max-w-full lg:max-h-full object-contain transition-opacity duration-300"
+            class="w-full lg:max-w-full lg:max-h-full object-contain transition-opacity duration-300 pointer-events-none select-none"
             [class.opacity-0]="fullImageLoaded()"
+            [style.transform]="zoomTransform()"
           />
           <img
             [src]="fullImageUrl()"
             [alt]="p.filename"
-            class="absolute inset-0 w-full h-full object-contain transition-opacity duration-300"
+            class="absolute inset-0 w-full h-full object-contain transition-opacity duration-300 pointer-events-none select-none"
             [class.opacity-0]="!fullImageLoaded()"
             (load)="onFullImageLoad()"
+            [style.transform]="zoomTransform()"
           />
         </div>
 
@@ -344,12 +355,29 @@ import { createLeafletMap } from '../../shared/leaflet';
           <!-- Location -->
           @if (p.gps_latitude != null && p.gps_longitude != null) {
             <div class="border-t border-[var(--mat-sys-outline-variant)] pt-3">
-              <div class="text-[0.625rem] uppercase tracking-wider text-[var(--mat-sys-on-surface-variant)] mb-2">{{ 'photo_detail.location' | translate }}</div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-[0.625rem] uppercase tracking-wider text-[var(--mat-sys-on-surface-variant)]">{{ 'photo_detail.location' | translate }}</div>
+                @if (auth.isEdition()) {
+                  <button mat-icon-button class="!w-7 !h-7 !p-0" (click)="editGps(p)" [matTooltip]="'photo_detail.edit_location' | translate">
+                    <mat-icon class="!text-base !w-4 !h-4 !leading-4">edit_location</mat-icon>
+                  </button>
+                }
+              </div>
               @if (locationName()) {
                 <div class="text-sm font-medium mb-1">{{ locationName() }}</div>
               }
               <div class="text-xs text-[var(--mat-sys-on-surface-variant)] mb-2">{{ p.gps_latitude | fixed:6 }}, {{ p.gps_longitude | fixed:6 }}</div>
               <div #locationMapContainer class="w-full h-40 rounded-lg overflow-hidden"></div>
+            </div>
+          } @else if (auth.isEdition()) {
+            <div class="border-t border-[var(--mat-sys-outline-variant)] pt-3">
+              <div class="flex items-center justify-between">
+                <div class="text-[0.625rem] uppercase tracking-wider text-[var(--mat-sys-on-surface-variant)]">{{ 'photo_detail.location' | translate }}</div>
+                <button mat-icon-button class="!w-7 !h-7 !p-0" (click)="editGps(p)" [matTooltip]="'photo_detail.add_location' | translate">
+                  <mat-icon class="!text-base !w-4 !h-4 !leading-4">add_location</mat-icon>
+                </button>
+              </div>
+              <p class="text-[var(--mat-sys-on-surface-variant)] opacity-40 italic text-xs">&mdash;</p>
             </div>
           }
 
@@ -410,12 +438,31 @@ export class PhotoDetailComponent implements OnInit {
 
   protected readonly photo = signal<Photo | null>(null);
   protected readonly fullImageLoaded = signal(false);
+  protected readonly downloading = signal(false);
   protected readonly downloadOptions = signal<DownloadOption[]>([]);
   protected readonly generatingCaption = signal(false);
   protected readonly translatingCaption = signal(false);
   protected readonly translatedCaption = signal<string | null>(null);
   protected readonly displayCaption = computed(() => this.translatedCaption() ?? this.photo()?.caption ?? null);
   protected readonly stars: readonly number[] = [1, 2, 3, 4, 5];
+
+  // Zoom & pan state
+  private readonly imagePanel = viewChild<ElementRef<HTMLDivElement>>('imagePanel');
+  protected readonly zoomScale = signal(1);
+  protected readonly panX = signal(0);
+  protected readonly panY = signal(0);
+  protected readonly isPanning = signal(false);
+  protected readonly zoomTransform = computed(() => {
+    const s = this.zoomScale();
+    const x = this.panX();
+    const y = this.panY();
+    return s === 1 && x === 0 && y === 0 ? '' : `scale(${s}) translate(${x}px, ${y}px)`;
+  });
+  private panStartX = 0;
+  private panStartY = 0;
+  private panOriginX = 0;
+  private panOriginY = 0;
+  private lastPinchDist = 0;
 
   // Download options
   private downloadOptionsEffect = effect(() => {
@@ -510,6 +557,13 @@ export class PhotoDetailComponent implements OnInit {
       if (this.locationMapTimeout !== null) clearTimeout(this.locationMapTimeout);
       if (this.locationMap) { this.locationMap.remove(); this.locationMap = null; }
     });
+    // Register wheel and touchmove as non-passive so preventDefault() works
+    afterNextRender(() => {
+      const el = this.imagePanel()?.nativeElement;
+      if (!el) return;
+      el.addEventListener('wheel', (e: WheelEvent) => this.onWheel(e), { passive: false });
+      el.addEventListener('touchmove', (e: TouchEvent) => this.onTouchMove(e), { passive: false });
+    });
   }
 
   protected readonly fullImageUrl = computed(() => {
@@ -557,13 +611,17 @@ export class PhotoDetailComponent implements OnInit {
     this.location.back();
   }
 
-  protected download(path: string, type = 'original', profile?: string): void {
-    const a = document.createElement('a');
-    a.href = this.api.downloadUrl(path, type, profile);
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  protected async download(path: string, type = 'original', profile?: string): Promise<void> {
+    this.downloading.set(true);
+    try {
+      await downloadAll(
+        [path],
+        p => this.api.downloadUrl(p, type, profile),
+        url => this.api.getRaw(url),
+      );
+    } finally {
+      this.downloading.set(false);
+    }
   }
 
   protected onFullImageLoad(): void {
@@ -642,5 +700,105 @@ export class PhotoDetailComponent implements OnInit {
     this.photoActions.openAddPerson(photo, () => {
       this.photo.update(p => p ? { ...p, unassigned_faces: Math.max(0, p.unassigned_faces - 1) } : p);
     });
+  }
+
+  protected editGps(p: Photo): void {
+    import('./gps-edit-dialog.component').then(m => {
+      const ref = this.dialog.open(m.GpsEditDialogComponent, {
+        width: '95vw',
+        maxWidth: '500px',
+        data: {
+          path: p.path,
+          filename: p.filename,
+          lat: p.gps_latitude ?? null,
+          lng: p.gps_longitude ?? null,
+        },
+      });
+      ref.afterClosed().subscribe((result: { gps_latitude: number | null; gps_longitude: number | null } | undefined) => {
+        if (result !== undefined) {
+          this.photo.set({ ...p, gps_latitude: result.gps_latitude ?? undefined, gps_longitude: result.gps_longitude ?? undefined });
+          this.locationName.set('');
+        }
+      });
+    });
+  }
+
+  // Zoom & pan
+
+  private applyZoom(raw: number): void {
+    const clamped = Math.min(5, Math.max(0.5, raw));
+    if (clamped === 1) { this.panX.set(0); this.panY.set(0); }
+    this.zoomScale.set(clamped);
+  }
+
+  protected onWheel(e: WheelEvent): void {
+    e.preventDefault();
+    this.applyZoom(this.zoomScale() + (e.deltaY > 0 ? -0.15 : 0.15));
+  }
+
+  protected resetZoom(): void {
+    this.zoomScale.set(1);
+    this.panX.set(0);
+    this.panY.set(0);
+  }
+
+  protected onPanStart(e: PointerEvent): void {
+    if (this.zoomScale() <= 1) return;
+    this.isPanning.set(true);
+    this.panStartX = e.clientX;
+    this.panStartY = e.clientY;
+    this.panOriginX = this.panX();
+    this.panOriginY = this.panY();
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  }
+
+  protected onPanMove(e: PointerEvent): void {
+    if (!this.isPanning()) return;
+    const scale = this.zoomScale();
+    const rawX = this.panOriginX + (e.clientX - this.panStartX) / scale;
+    const rawY = this.panOriginY + (e.clientY - this.panStartY) / scale;
+    // Clamp pan so the image can't be dragged entirely off-screen
+    const el = this.imagePanel()?.nativeElement;
+    if (el) {
+      const limit = Math.max(el.clientWidth, el.clientHeight) / (2 * scale);
+      this.panX.set(Math.max(-limit, Math.min(limit, rawX)));
+      this.panY.set(Math.max(-limit, Math.min(limit, rawY)));
+    } else {
+      this.panX.set(rawX);
+      this.panY.set(rawY);
+    }
+  }
+
+  protected onPanEnd(e: PointerEvent): void {
+    if (!this.isPanning()) return;
+    this.isPanning.set(false);
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }
+
+  protected onTouchStart(e: TouchEvent): void {
+    if (e.touches.length === 2) {
+      this.lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+    }
+  }
+
+  protected onTouchMove(e: TouchEvent): void {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      if (this.lastPinchDist > 0) {
+        this.applyZoom(this.zoomScale() * (dist / this.lastPinchDist));
+      }
+      this.lastPinchDist = dist;
+    }
+  }
+
+  protected onTouchEnd(): void {
+    this.lastPinchDist = 0;
   }
 }

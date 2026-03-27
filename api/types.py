@@ -60,31 +60,11 @@ def _build_type_definitions():
         ('top_picks', 'Top Picks', f"({top_picks_expr}) >= {threshold}", []),
     ]
 
-    category_labels = {
-        'portrait': 'Portraits',
-        'group_portrait': 'Group Portraits',
-        'human_others': 'People in Scene',
-        'silhouette': 'Silhouettes',
-        'street': 'Street',
-        'concert': 'Concerts',
-        'art': 'Art & Statues',
-        'macro': 'Macro',
-        'astro': 'Astrophotography',
-        'aerial': 'Aerial & Drone',
-        'wildlife': 'Wildlife',
-        'food': 'Food',
-        'architecture': 'Architecture',
-        'long_exposure': 'Long Exposure',
-        'night': 'Night',
-        'monochrome': 'Black & White',
-        'others': 'Others',
-    }
-
+    # Auto-include all categories from config (label resolved via i18n on frontend)
     for cat in _config_categories:
         cat_name = cat.get('name', '')
-        if cat_name and cat_name in category_labels:
-            label = category_labels[cat_name]
-            types.append((cat_name, label, "category = ?", [cat_name]))
+        if cat_name and cat_name != 'default':
+            types.append((cat_name, cat_name, "category = ?", [cat_name]))
 
     return types
 

@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, Pipe, PipeTransform } from '@angular/core';
+import { Component, inject, signal, computed, Pipe, PipeTransform, OnDestroy, WritableSignal } from '@angular/core';
 import { Router } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
@@ -58,6 +58,20 @@ export class IsConfirmedPipe implements PipeTransform {
   }
 }
 
+@Pipe({ name: 'isPassing' })
+export class IsPassingPipe implements PipeTransform {
+  transform(group: CullingGroup, passingGroups: Map<string, number>): boolean {
+    return passingGroups.has(`${group.group_id}_${group.type}`);
+  }
+}
+
+@Pipe({ name: 'passCountdown' })
+export class PassCountdownPipe implements PipeTransform {
+  transform(group: CullingGroup, passingGroups: Map<string, number>): number {
+    return passingGroups.get(`${group.group_id}_${group.type}`) ?? 0;
+  }
+}
+
 interface CullingGroupsResponse {
   groups: CullingGroup[];
   total_groups: number;
@@ -81,6 +95,8 @@ interface CullingGroupsResponse {
     IsKeptPipe,
     IsDecidedPipe,
     IsConfirmedPipe,
+    IsPassingPipe,
+    PassCountdownPipe,
     InfiniteScrollDirective,
   ],
   template: `
@@ -112,11 +128,11 @@ interface CullingGroupsResponse {
         <div class="flex justify-center items-center py-20">
           <mat-spinner diameter="40" />
         </div>
-      } @else if (groups().length === 0) {
+      } @else if (visibleGroups().length === 0) {
         <p class="text-center py-20 opacity-60">{{ 'culling.no_bursts' | translate }}</p>
       } @else {
         <div class="space-y-6 pb-4">
-          @for (group of groups(); track group.group_id + '_' + group.type; let i = $index) {
+          @for (group of visibleGroups(); track group.group_id + '_' + group.type; let i = $index) {
             <div class="rounded-xl border border-[var(--mat-sys-outline-variant)] overflow-hidden transition-opacity duration-300"
                  [class.opacity-40]="(group | isConfirmed:confirmedGroups())"
                  [class.pointer-events-none]="(group | isConfirmed:confirmedGroups())">
@@ -170,14 +186,24 @@ interface CullingGroupsResponse {
                   </span>
                 }
                 <div class="flex gap-2 ml-auto">
-                  <button mat-stroked-button (click)="skipGroup(group)" class="!h-8 !text-sm">
-                    {{ 'culling.skip' | translate }}
-                  </button>
-                  <button mat-flat-button (click)="confirmGroup(group)" [disabled]="confirming()"
-                          class="!h-8 !text-sm inline-flex items-center">
-                    <mat-icon class="inline-flex !text-base !w-4 !h-4 !leading-4 mr-1">check_circle</mat-icon>
-                    {{ 'culling.confirm' | translate }}
-                  </button>
+                  @if (group | isPassing:passingGroups()) {
+                    <div class="relative overflow-hidden rounded-full">
+                      <button mat-stroked-button (click)="cancelPass(group)" class="!h-8 !text-sm relative z-10">
+                        {{ 'culling.cancel_pass' | translate }} ({{ group | passCountdown:passingGroups() }}s)
+                      </button>
+                      <div class="absolute inset-0 bg-[var(--mat-sys-outline-variant)] opacity-30 origin-right transition-transform duration-1000 ease-linear"
+                           [style.transform]="'scaleX(' + ((group | passCountdown:passingGroups()) / 5) + ')'"></div>
+                    </div>
+                  } @else {
+                    <button mat-stroked-button (click)="skipGroup(group)" class="!h-8 !text-sm">
+                      {{ 'culling.skip' | translate }}
+                    </button>
+                    <button mat-flat-button (click)="confirmGroup(group)" [disabled]="confirming()"
+                            class="!h-8 !text-sm inline-flex items-center">
+                      <mat-icon class="inline-flex !text-base !w-4 !h-4 !leading-4 mr-1">check_circle</mat-icon>
+                      {{ 'culling.confirm' | translate }}
+                    </button>
+                  }
                 </div>
               </div>
             </div>
@@ -208,7 +234,7 @@ interface CullingGroupsResponse {
   `,
   host: { class: 'block' },
 })
-export class BurstCullingComponent {
+export class BurstCullingComponent implements OnDestroy {
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
@@ -228,19 +254,53 @@ export class BurstCullingComponent {
   /** Set of confirmed group keys (group_id + '_' + type) */
   protected readonly confirmedGroups = signal<Set<string>>(new Set());
 
+  /** Map of group key -> remaining countdown seconds for groups being passed */
+  protected readonly passingGroups = signal<Map<string, number>>(new Map());
+
+  /** Set of group keys hidden after pass timeout */
+  private readonly hiddenGroups = signal<Set<string>>(new Set());
+
+  /** Active timers for passing groups (for cleanup) */
+  private readonly passTimers = new Map<string, { timeoutId: ReturnType<typeof setTimeout>; intervalId: ReturnType<typeof setInterval> }>();
+
   protected readonly currentPage = signal(1);
   protected readonly totalPages = signal(1);
   private readonly similarSeed = Math.floor(Math.random() * 1_000_000);
 
   protected readonly hasMore = computed(() => this.currentPage() < this.totalPages());
 
+  /** Groups visible in the UI (excludes hidden groups that completed pass timeout) */
+  protected readonly visibleGroups = computed(() => {
+    const hidden = this.hiddenGroups();
+    return this.groups().filter(g => !hidden.has(this.groupKey(g)));
+  });
+
   protected readonly unconfirmedCount = computed(() => {
     const confirmed = this.confirmedGroups();
-    return this.groups().filter(g => !confirmed.has(this.groupKey(g))).length;
+    return this.visibleGroups().filter(g => !confirmed.has(this.groupKey(g))).length;
   });
 
   constructor() {
     void this.loadGroups();
+  }
+
+  /** Update a signal holding a Map by cloning and setting a key. */
+  private updateMapSignal<K, V>(sig: WritableSignal<Map<K, V>>, key: K, value: V): void {
+    sig.update(m => { const next = new Map(m); next.set(key, value); return next; });
+  }
+
+  /** Update a signal holding a Map by cloning and deleting a key. */
+  private deleteMapKey<K, V>(sig: WritableSignal<Map<K, V>>, key: K): void {
+    sig.update(m => { if (!m.has(key)) return m; const next = new Map(m); next.delete(key); return next; });
+  }
+
+  /** Update a signal holding a Set by cloning and adding a value. */
+  private addToSetSignal<V>(sig: WritableSignal<Set<V>>, value: V): void {
+    sig.update(s => { const next = new Set(s); next.add(value); return next; });
+  }
+
+  ngOnDestroy(): void {
+    this.clearAllPassTimers();
   }
 
   protected groupKey(group: CullingGroup): string {
@@ -272,6 +332,7 @@ export class BurstCullingComponent {
     this.groups.set([]);
     this.confirmedGroups.set(new Set());
     this.selectionsMap.set(new Map());
+    this.clearAllPassTimers();
     void this.loadGroups();
   }
 
@@ -337,9 +398,7 @@ export class BurstCullingComponent {
   }
 
   protected selectExclusive(path: string, group: CullingGroup): void {
-    const map = new Map(this.selectionsMap());
-    map.set(group.group_id, new Set([path]));
-    this.selectionsMap.set(map);
+    this.updateMapSignal(this.selectionsMap, group.group_id, new Set([path]));
   }
 
   protected async confirmGroup(group: CullingGroup): Promise<void> {
@@ -354,11 +413,7 @@ export class BurstCullingComponent {
         paths: group.photos.map(p => p.path),
         keep_paths: [...kept],
       }));
-      this.confirmedGroups.update(s => {
-        const next = new Set(s);
-        next.add(this.groupKey(group));
-        return next;
-      });
+      this.addToSetSignal(this.confirmedGroups, this.groupKey(group));
       this.snackBar.open(this.i18n.t('culling.confirmed'), '', { duration: 2000, horizontalPosition: 'right', verticalPosition: 'bottom' });
     } catch {
       this.snackBar.open(this.i18n.t('culling.error_confirming'), '', { duration: 2000, horizontalPosition: 'right', verticalPosition: 'bottom' });
@@ -368,11 +423,53 @@ export class BurstCullingComponent {
   }
 
   protected skipGroup(group: CullingGroup): void {
-    this.confirmedGroups.update(s => {
-      const next = new Set(s);
-      next.add(this.groupKey(group));
-      return next;
-    });
+    const key = this.groupKey(group);
+
+    // Clear any existing timer for this group before starting a new one
+    this.clearPassTimer(key);
+
+    // Start the 5-second countdown
+    this.updateMapSignal(this.passingGroups, key, 5);
+
+    const intervalId = setInterval(() => {
+      const current = this.passingGroups().get(key);
+      if (current !== undefined) {
+        this.updateMapSignal(this.passingGroups, key, current - 1);
+      }
+    }, 1000);
+
+    const timeoutId = setTimeout(() => {
+      this.clearPassTimer(key);
+      // Hide the group after timeout
+      this.addToSetSignal(this.hiddenGroups, key);
+    }, 5000);
+
+    this.passTimers.set(key, { timeoutId, intervalId });
+  }
+
+  protected cancelPass(group: CullingGroup): void {
+    const key = this.groupKey(group);
+    this.clearPassTimer(key);
+  }
+
+  private clearPassTimer(key: string): void {
+    const timers = this.passTimers.get(key);
+    if (timers) {
+      clearTimeout(timers.timeoutId);
+      clearInterval(timers.intervalId);
+      this.passTimers.delete(key);
+    }
+    this.deleteMapKey(this.passingGroups, key);
+  }
+
+  private clearAllPassTimers(): void {
+    for (const { timeoutId, intervalId } of this.passTimers.values()) {
+      clearTimeout(timeoutId);
+      clearInterval(intervalId);
+    }
+    this.passTimers.clear();
+    this.passingGroups.set(new Map());
+    this.hiddenGroups.set(new Set());
   }
 
   protected async confirmAllRemaining(): Promise<void> {
@@ -400,13 +497,9 @@ export class BurstCullingComponent {
         }));
       }
 
-      this.confirmedGroups.update(s => {
-        const next = new Set(s);
-        for (const g of remaining) {
-          next.add(this.groupKey(g));
-        }
-        return next;
-      });
+      for (const g of remaining) {
+        this.addToSetSignal(this.confirmedGroups, this.groupKey(g));
+      }
       this.snackBar.open(this.i18n.t('culling.confirmed'), '', { duration: 2000, horizontalPosition: 'right', verticalPosition: 'bottom' });
     } catch {
       this.snackBar.open(this.i18n.t('culling.error_auto_select'), '', { duration: 2000, horizontalPosition: 'right', verticalPosition: 'bottom' });

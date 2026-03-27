@@ -11,7 +11,7 @@ import { PhotoDetailComponent } from './photo-detail.component';
 describe('PhotoDetailComponent', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let component: any;
-  let mockApi: { get: jest.Mock; post: jest.Mock; imageUrl: jest.Mock; downloadUrl: jest.Mock };
+  let mockApi: { get: jest.Mock; post: jest.Mock; imageUrl: jest.Mock; downloadUrl: jest.Mock; getRaw: jest.Mock };
   let mockRouter: { navigate: jest.Mock };
   let mockLocation: { back: jest.Mock };
   let mockRoute: { snapshot: { queryParamMap: { get: jest.Mock } } };
@@ -69,6 +69,7 @@ describe('PhotoDetailComponent', () => {
       post: jest.fn(() => of({})),
       imageUrl: jest.fn((path: string) => `/image?path=${encodeURIComponent(path)}`),
       downloadUrl: jest.fn((path: string, type = 'original', profile?: string) => `/api/download?path=${encodeURIComponent(path)}&type=${type}${profile ? '&profile=' + profile : ''}`),
+      getRaw: jest.fn(() => of(new Blob(['test'], { type: 'image/jpeg' }))),
     };
     mockRouter = { navigate: jest.fn() };
     mockLocation = { back: jest.fn() };
@@ -241,17 +242,21 @@ describe('PhotoDetailComponent', () => {
   });
 
   describe('download', () => {
-    it('should create and click a download link', () => {
+    it('should fetch blob and set downloading state', async () => {
       createComponent();
+      URL.createObjectURL = jest.fn(() => 'blob:mock');
+      URL.revokeObjectURL = jest.fn();
       const appendSpy = jest.spyOn(document.body, 'appendChild').mockImplementation((el) => el);
       const removeSpy = jest.spyOn(document.body, 'removeChild').mockImplementation((el) => el);
 
-      component.download('/photos/test.jpg');
+      expect(component.downloading()).toBe(false);
 
-      expect(appendSpy).toHaveBeenCalled();
-      const anchor = appendSpy.mock.calls[0][0] as HTMLAnchorElement;
-      expect(anchor.href).toContain('/api/download?path=');
-      expect(removeSpy).toHaveBeenCalled();
+      const promise = component.download('/photos/test.jpg');
+      expect(component.downloading()).toBe(true);
+
+      await promise;
+      expect(component.downloading()).toBe(false);
+      expect(mockApi.getRaw).toHaveBeenCalled();
 
       appendSpy.mockRestore();
       removeSpy.mockRestore();

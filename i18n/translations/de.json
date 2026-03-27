@@ -38,6 +38,10 @@
       "back": "Zurück",
       "cancel": "Abbrechen",
       "download": "Herunterladen",
+      "edit_location": "Standort bearbeiten",
+      "add_location": "Standort hinzufügen",
+      "gps_click_to_place": "Klicken Sie auf die Karte, um eine Markierung zu setzen",
+      "gps_clear": "Standort entfernen",
       "save": "Speichern",
       "load_more": "Mehr laden"
     },
@@ -191,7 +195,8 @@
     "caption": "Beschreibung",
     "histogram_spread": "Histogramm",
     "star_rating": "Bewertung",
-    "topiq_score": "TOPIQ"
+    "topiq_score": "TOPIQ",
+    "persons": "Personen"
   },
   "notifications": {
     "copied": "Kopiert!",
@@ -305,6 +310,7 @@
       "equal_quality": "Beide Fotos sind gleich gut (oder gleich schlecht)",
       "cant_compare": "Kann mich nicht entscheiden oder Fotos sind zu unterschiedlich zum Vergleichen",
       "suggest_weights": "Optimale Gewichte basierend auf Ihren Vergleichen vorschlagen",
+      "suggest_weights_disabled": "Mindestens {min} Vergleiche erforderlich ({count} bisher)",
       "apply_config": "Vorgeschlagene Gewichte in Konfigurationsdatei speichern",
       "recalculate": "Alle Kategorien und Gesamtwertungen mit aktueller Konfiguration neu berechnen",
       "reset_weights": "Gewichtungsregler auf Originalwerte zurücksetzen",
@@ -968,6 +974,7 @@
   },
   "nav": {
     "gallery": "Galerie",
+    "gallery_tooltip": "Galerie (Doppelklick zum Zurücksetzen der Filter)",
     "stats": "Statistiken",
     "persons": "Personen",
     "compare": "Gewichtungsoptimierung",
@@ -1057,12 +1064,12 @@
       "add_filter": "Filter hinzufügen...",
       "semantic_search": "Semantische Suche",
       "location": "Standort",
-      "persons": "Personen"
+      "persons": "Personen",
+      "smart_album_filter_notice": "Smart-Album — Filteränderungen werden automatisch gespeichert."
     },
     "semantic_search_info": "Die semantische Suche lädt beim ersten Gebrauch Embeddings in den RAM. Bei großen Bibliotheken kann dies einen Moment dauern.",
     "select_on_map": "Auf Karte auswählen",
     "gps_radius": "Radius",
-    "gps_clear": "Standort löschen",
     "hide_rejected": "Abgelehnte ausblenden",
     "favorites_only": "Nur Favoriten",
     "monochrome_only": "Nur Schwarzweiß",
@@ -1099,7 +1106,8 @@
     "power_point_range": "Kraftpunkte",
     "quality_score_range": "Qualitätswert",
     "saturation_range": "Sättigung",
-    "star_rating_range": "Sternebewertung"
+    "star_rating_range": "Sternebewertung",
+    "gps_clear": "Standort entfernen"
   },
   "composition_patterns": {
     "none": "Keines",
@@ -1154,7 +1162,11 @@
     "weather": "Wetter",
     "fashion": "Mode",
     "silhouette": "Silhouette",
-    "portrait_bw": "S&W-Porträt"
+    "portrait_bw": "S&W-Porträt",
+    "golden_hour": "Goldene Stunde",
+    "blue_hour": "Blaue Stunde",
+    "product": "Produkt",
+    "candid": "Spontan"
   },
   "comparison": {
     "title": "Gewichtungsoptimierung",
@@ -1256,11 +1268,13 @@
       "skip_oversaturation_penalty": "Übersättigungsstrafe überspringen",
       "apply_blink_penalty": "Blinzelstrafe anwenden",
       "bonus_hint": "Fester Wertungsversatz, der nach allen gewichteten Berechnungen addiert wird.",
-      "noise_tolerance_hint": "Skaliert die Rauschstrafe. 1.0 = volle Strafe (Standard), 0.0 = keine Strafe, 0.3 = milde.",
-      "clipping_multiplier_hint": "Multipliziert die Überbelichtungsstrafe. 1.0 = Standard, 1.5 = strenger, 0 = deaktiviert.",
+      "noise_tolerance_hint": "Skaliert die Rauschstrafe. 100% = volle Strafe (Standard), 0% = keine Strafe, 30% = nachsichtig.",
+      "clipping_multiplier_hint": "Multipliziert die Überbelichtungsstrafe. 100% = Standard, 150% = strenger, 0% = deaktiviert.",
       "skip_clipping_penalty_hint": "Deaktiviert die Überbelichtungsstrafe. Standard: aktiv für Silhouette.",
       "skip_oversaturation_penalty_hint": "Deaktiviert die Übersättigungsstrafe. Standard: aktiv für Nacht, Astro, Konzert.",
-      "apply_blink_penalty_hint": "Wendet einen Wertungsmultiplikator bei Blinzelerkennung an. Standard: aktiv für Porträtkategorien."
+      "apply_blink_penalty_hint": "Wendet einen Wertungsmultiplikator bei Blinzelerkennung an. Standard: aktiv für Porträtkategorien.",
+      "noise_tolerance_range": "0% = keine Strafe, 100% = volle Strafe (Standard), 200% = doppelte Strafe",
+      "clipping_multiplier_range": "0% = deaktiviert, 100% = Standard, 500% = sehr streng"
     },
     "filters": "Filter",
     "filters_description": "Bedingungen für die Kategoriezuordnung",
@@ -1304,8 +1318,8 @@
     },
     "validation": {
       "bonus_range": "Bonus muss zwischen -5 und 5 liegen",
-      "noise_tolerance_range": "Rauschtoleranz muss zwischen 0 und 2 liegen",
-      "clipping_multiplier_range": "Multiplikator muss zwischen 0 und 5 liegen",
+      "noise_tolerance_range": "Rauschtoleranz muss zwischen 0% und 200% liegen",
+      "clipping_multiplier_range": "Multiplikator muss zwischen 0% und 500% liegen",
       "ratio_range": "Wert muss zwischen 0,0 und 1,0 liegen",
       "non_negative": "Wert muss 0 oder größer sein",
       "shutter_range": "Verschlusszeit muss zwischen 0 und 60 Sekunden liegen",
@@ -1490,7 +1504,35 @@
       "silhouette": "Silhouette erkannt (Gegenlicht-Gesicht)",
       "tags": "Ubereinstimmende Tags: {tags}",
       "luminance": "Helligkeit = {value} (≤ {threshold})",
-      "long_exposure": "Langzeitbelichtung erkannt"
+      "long_exposure": "Langzeitbelichtung erkannt",
+      "rejected_header": "{count} Kategorien zuvor ausgewertet",
+      "mismatch": {
+        "required_tags": "keine passenden Tags ({tags})",
+        "excluded_tags": "ausgeschlossene Tags vorhanden ({tags})",
+        "has_face": "kein Gesicht erkannt",
+        "has_face_false": "Gesicht erkannt",
+        "is_monochrome": "nicht monochrom",
+        "is_monochrome_false": "ist monochrom",
+        "is_silhouette": "keine Silhouette",
+        "is_silhouette_false": "ist eine Silhouette",
+        "is_group_portrait": "kein Gruppenportrait",
+        "is_group_portrait_false": "ist ein Gruppenportrait",
+        "face_ratio_min": "Gesichtsanteil {actual} < {required}",
+        "face_ratio_max": "Gesichtsanteil {actual} > {required}",
+        "face_count_min": "Gesichteranzahl {actual} < {required}",
+        "face_count_max": "Gesichteranzahl {actual} > {required}",
+        "luminance_min": "Helligkeit {actual} < {required}",
+        "luminance_max": "Helligkeit {actual} > {required}",
+        "shutter_speed_min": "Belichtungszeit zu kurz",
+        "shutter_speed_max": "Belichtungszeit zu lang",
+        "iso_min": "ISO {actual} < {required}",
+        "iso_max": "ISO {actual} > {required}",
+        "focal_length_min": "Brennweite {actual} < {required}",
+        "focal_length_max": "Brennweite {actual} > {required}",
+        "f_stop_min": "Blende {actual} < {required}",
+        "f_stop_max": "Blende {actual} > {required}",
+        "no_value": "Daten nicht verfügbar"
+      }
     },
     "penalty": {
       "blink": "Blinzeln erkannt",
@@ -1530,7 +1572,8 @@
     "photos": "Fotos",
     "threshold": "Ähnlichkeit",
     "load_more": "Mehr laden",
-    "view_detail": "Detail anzeigen"
+    "view_detail": "Detail anzeigen",
+    "cancel_pass": "Abbrechen"
   },
   "memories": {
     "title": "An diesem Tag",
@@ -1734,7 +1777,11 @@
     "caption_edit_title": "Beschreibung bearbeiten",
     "caption_error": "Beschreibung konnte nicht generiert werden",
     "translating_caption": "Übersetzen...",
-    "location": "Standort"
+    "location": "Standort",
+    "edit_location": "Standort bearbeiten",
+    "add_location": "Standort hinzufügen",
+    "gps_click_to_place": "Klicken Sie auf die Karte, um eine Markierung zu setzen",
+    "gps_clear": "Standort entfernen"
   },
   "download": {
     "type_original": "Original",

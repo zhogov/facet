@@ -29,10 +29,22 @@ interface CategoryReasonDetail {
   tags?: string[];
 }
 
+interface CategoryMismatch {
+  key: string;
+  required?: unknown;
+  actual?: unknown;
+}
+
+interface RejectedCategory {
+  category: string;
+  mismatch: CategoryMismatch;
+}
+
 interface CategoryReason {
   reason_key: string;
   category: string;
   details: CategoryReasonDetail[];
+  rejected?: RejectedCategory[];
 }
 
 interface CritiqueResponse {
@@ -83,12 +95,45 @@ export class CategoryReasonPipe implements PipeTransform {
   }
 }
 
+@Pipe({ name: 'mismatchReason', standalone: true })
+export class MismatchReasonPipe implements PipeTransform {
+  private i18n = inject(I18nService);
+
+  transform(mismatch: CategoryMismatch): string {
+    const key = mismatch.key;
+
+    if (key === 'required_tags') {
+      const tags = (mismatch.required as string[] || []).slice(0, 3).join(', ');
+      const suffix = (mismatch.required as string[] || []).length > 3 ? ', …' : '';
+      return this.i18n.t('critique.reason.mismatch.required_tags', { tags: tags + suffix });
+    }
+    if (key === 'excluded_tags') {
+      return this.i18n.t('critique.reason.mismatch.excluded_tags', { tags: (mismatch.actual as string[]).join(', ') });
+    }
+
+    // Boolean filters — pick the right key based on required value
+    if (['has_face', 'is_monochrome', 'is_silhouette', 'is_group_portrait'].includes(key)) {
+      const suffix = mismatch.required ? '' : '_false';
+      return this.i18n.t(`critique.reason.mismatch.${key}${suffix}`);
+    }
+
+    // Numeric filters
+    if (mismatch.actual === null || mismatch.actual === undefined) {
+      return this.i18n.t('critique.reason.mismatch.no_value');
+    }
+    return this.i18n.t(`critique.reason.mismatch.${key}`, {
+      required: String(mismatch.required ?? ''),
+      actual: String(mismatch.actual ?? ''),
+    });
+  }
+}
+
 @Component({
   selector: 'app-photo-critique-dialog',
   standalone: true,
   imports: [
     MatDialogModule, MatButtonModule, MatIconModule, MatProgressSpinnerModule,
-    DecimalPipe, PercentPipe, TranslatePipe, ContributionColorPipe, CategoryReasonPipe,
+    DecimalPipe, PercentPipe, TranslatePipe, ContributionColorPipe, CategoryReasonPipe, MismatchReasonPipe,
   ],
   template: `
     <h2 mat-dialog-title class="!flex items-center gap-2 truncate">
@@ -112,7 +157,25 @@ export class CategoryReasonPipe implements PipeTransform {
         <!-- Category reason -->
         <div class="text-sm mb-4 p-3 rounded-lg bg-[var(--mat-sys-surface-container)]">
           <div class="text-xs uppercase tracking-wider opacity-50 mb-1">{{ 'critique.category_reason' | translate }}</div>
-          {{ c.category_reason | categoryReason }}
+          <div>{{ c.category_reason | categoryReason }}</div>
+          @if (c.category_reason.rejected?.length) {
+            <button class="mt-2 text-xs opacity-50 hover:opacity-80 flex items-center gap-1 cursor-pointer"
+                    (click)="showRejected.set(!showRejected())">
+              <mat-icon class="!text-sm !w-4 !h-4 !leading-4">{{ showRejected() ? 'expand_less' : 'expand_more' }}</mat-icon>
+              {{ 'critique.reason.rejected_header' | translate:{ count: '' + c.category_reason.rejected!.length } }}
+            </button>
+            @if (showRejected()) {
+              <ul class="mt-1 space-y-0.5 text-xs">
+                @for (r of c.category_reason.rejected; track r.category) {
+                  <li class="flex items-center gap-1.5 opacity-70">
+                    <mat-icon class="!text-xs !w-3.5 !h-3.5 !leading-3.5 text-red-400/60 shrink-0">close</mat-icon>
+                    <span class="font-medium">{{ r.category }}</span>
+                    <span class="opacity-60">— {{ r.mismatch | mismatchReason }}</span>
+                  </li>
+                }
+              </ul>
+            }
+          }
         </div>
 
         <!-- Score breakdown table -->
@@ -207,6 +270,7 @@ export class PhotoCritiqueDialogComponent implements OnInit {
   protected readonly loading = signal(true);
   protected readonly critique = signal<CritiqueResponse | null>(null);
   protected readonly error = signal<string | null>(null);
+  protected readonly showRejected = signal(false);
   protected readonly hasPenalties = computed(() => {
     const c = this.critique();
     return !!(c && Object.keys(c.penalties).length > 0);

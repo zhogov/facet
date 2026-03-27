@@ -191,7 +191,8 @@
     "caption": "Didascalia",
     "histogram_spread": "Istogramma",
     "star_rating": "Valutazione",
-    "topiq_score": "TOPIQ"
+    "topiq_score": "TOPIQ",
+    "persons": "Persone"
   },
   "notifications": {
     "copied": "Copiato!",
@@ -305,6 +306,7 @@
       "equal_quality": "Entrambe le foto sono ugualmente buone (o ugualmente scadenti)",
       "cant_compare": "Non riesci a decidere o le foto sono troppo diverse per essere confrontate",
       "suggest_weights": "Suggerisci pesi ottimali basati sui tuoi confronti",
+      "suggest_weights_disabled": "Servono almeno {min} confronti ({count} finora)",
       "apply_config": "Salva i pesi suggeriti nel file di configurazione",
       "recalculate": "Ricalcola tutte le categorie e i punteggi aggregati usando la configurazione corrente",
       "reset_weights": "Ripristina i cursori dei pesi ai valori originali",
@@ -968,6 +970,7 @@
   },
   "nav": {
     "gallery": "Galleria",
+    "gallery_tooltip": "Galleria (doppio clic per reimpostare i filtri)",
     "stats": "Statistiche",
     "persons": "Persone",
     "compare": "Regolazione pesi",
@@ -1057,12 +1060,12 @@
       "add_filter": "Aggiungi filtro...",
       "semantic_search": "Ricerca semantica",
       "location": "Posizione",
-      "persons": "Persone"
+      "persons": "Persone",
+      "smart_album_filter_notice": "Album intelligente — i filtri vengono salvati automaticamente."
     },
     "semantic_search_info": "La ricerca semantica carica gli embedding nella RAM al primo utilizzo. Potrebbe richiedere un momento per le librerie di grandi dimensioni.",
     "select_on_map": "Seleziona sulla mappa",
     "gps_radius": "Raggio",
-    "gps_clear": "Cancella posizione",
     "hide_rejected": "Nascondi scartate",
     "favorites_only": "Solo preferite",
     "monochrome_only": "Solo monocromatiche",
@@ -1099,7 +1102,8 @@
     "power_point_range": "Punti di forza",
     "quality_score_range": "Punteggio qualità",
     "saturation_range": "Saturazione",
-    "star_rating_range": "Valutazione a stelle"
+    "star_rating_range": "Valutazione a stelle",
+    "gps_clear": "Rimuovi posizione"
   },
   "composition_patterns": {
     "none": "Nessuno",
@@ -1154,7 +1158,11 @@
     "weather": "Meteo",
     "fashion": "Moda",
     "silhouette": "Silhouette",
-    "portrait_bw": "Ritratto B/N"
+    "portrait_bw": "Ritratto B/N",
+    "golden_hour": "Ora dorata",
+    "blue_hour": "Ora blu",
+    "product": "Prodotto",
+    "candid": "Spontanea"
   },
   "comparison": {
     "title": "Regolazione pesi",
@@ -1256,11 +1264,13 @@
       "skip_oversaturation_penalty": "Salta penalità di sovrasaturazione",
       "apply_blink_penalty": "Applica penalità ammiccamento",
       "bonus_hint": "Offset fisso di punteggio aggiunto dopo tutti i calcoli ponderati.",
-      "noise_tolerance_hint": "Scala la penalità del rumore. 1.0 = penalità piena (predefinito), 0.0 = nessuna penalità, 0.3 = indulgente.",
-      "clipping_multiplier_hint": "Moltiplica la penalità di ritaglio delle alte luci. 1.0 = standard, 1.5 = più severo, 0 = disattivato.",
+      "noise_tolerance_hint": "Scala la penalità per rumore. 100% = penalità completa (predefinito), 0% = nessuna penalità, 30% = indulgente.",
+      "clipping_multiplier_hint": "Moltiplica la penalità di ritaglio. 100% = standard, 150% = più severo, 0% = disattivato.",
       "skip_clipping_penalty_hint": "Disattiva la penalità di ritaglio delle alte luci. Predefinito: attivo per silhouette.",
       "skip_oversaturation_penalty_hint": "Disattiva la penalità di sovrasaturazione. Predefinito: attivo per notturna, astro, concerto.",
-      "apply_blink_penalty_hint": "Applica un moltiplicatore di punteggio al rilevamento di ammiccamento. Predefinito: attivo per le categorie ritratto."
+      "apply_blink_penalty_hint": "Applica un moltiplicatore di punteggio al rilevamento di ammiccamento. Predefinito: attivo per le categorie ritratto.",
+      "noise_tolerance_range": "0% = nessuna penalità, 100% = penalità completa (predefinito), 200% = doppia penalità",
+      "clipping_multiplier_range": "0% = disattivato, 100% = standard, 500% = molto severo"
     },
     "filters": "Filtri",
     "filters_description": "Condizioni di assegnazione alla categoria",
@@ -1304,8 +1314,8 @@
     },
     "validation": {
       "bonus_range": "Il bonus deve essere compreso tra -5 e 5",
-      "noise_tolerance_range": "La tolleranza al rumore deve essere tra 0 e 2",
-      "clipping_multiplier_range": "Il moltiplicatore di ritaglio deve essere tra 0 e 5",
+      "noise_tolerance_range": "La tolleranza al rumore deve essere tra 0% e 200%",
+      "clipping_multiplier_range": "Il moltiplicatore di ritaglio deve essere tra 0% e 500%",
       "ratio_range": "Il valore deve essere tra 0,0 e 1,0",
       "non_negative": "Il valore deve essere 0 o maggiore",
       "shutter_range": "La velocità dell'otturatore deve essere tra 0 e 60 secondi",
@@ -1490,7 +1500,35 @@
       "silhouette": "silhouette rilevata (viso controluce)",
       "tags": "tag corrispondenti: {tags}",
       "luminance": "luminosita = {value} (≤ {threshold})",
-      "long_exposure": "lunga esposizione rilevata"
+      "long_exposure": "lunga esposizione rilevata",
+      "rejected_header": "{count} categorie valutate prima",
+      "mismatch": {
+        "required_tags": "nessun tag corrispondente ({tags})",
+        "excluded_tags": "tag esclusi presenti ({tags})",
+        "has_face": "nessun volto rilevato",
+        "has_face_false": "volto rilevato",
+        "is_monochrome": "non monocromatica",
+        "is_monochrome_false": "è monocromatica",
+        "is_silhouette": "non è una silhouette",
+        "is_silhouette_false": "è una silhouette",
+        "is_group_portrait": "non è un ritratto di gruppo",
+        "is_group_portrait_false": "è un ritratto di gruppo",
+        "face_ratio_min": "rapporto viso {actual} < {required}",
+        "face_ratio_max": "rapporto viso {actual} > {required}",
+        "face_count_min": "numero volti {actual} < {required}",
+        "face_count_max": "numero volti {actual} > {required}",
+        "luminance_min": "luminosità {actual} < {required}",
+        "luminance_max": "luminosità {actual} > {required}",
+        "shutter_speed_min": "velocità otturatore troppo breve",
+        "shutter_speed_max": "velocità otturatore troppo lunga",
+        "iso_min": "ISO {actual} < {required}",
+        "iso_max": "ISO {actual} > {required}",
+        "focal_length_min": "lunghezza focale {actual} < {required}",
+        "focal_length_max": "lunghezza focale {actual} > {required}",
+        "f_stop_min": "diaframma {actual} < {required}",
+        "f_stop_max": "diaframma {actual} > {required}",
+        "no_value": "dato non disponibile"
+      }
     },
     "penalty": {
       "blink": "Battito di ciglia rilevato",
@@ -1530,7 +1568,8 @@
     "photos": "foto",
     "threshold": "Similarità",
     "load_more": "Carica altro",
-    "view_detail": "Vedi dettaglio"
+    "view_detail": "Vedi dettaglio",
+    "cancel_pass": "Annulla"
   },
   "memories": {
     "title": "In questo giorno",
@@ -1717,6 +1756,10 @@
     "back": "Indietro",
     "download": "Scarica",
     "downloading": "Download in corso…",
+    "edit_location": "Modifica posizione",
+    "add_location": "Aggiungi posizione",
+    "gps_click_to_place": "Clicca sulla mappa per posizionare un segnaposto",
+    "gps_clear": "Rimuovi posizione",
     "caption": "Didascalia",
     "no_caption": "Nessuna didascalia disponibile",
     "persons": "Persone",

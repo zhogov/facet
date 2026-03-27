@@ -20,15 +20,18 @@ function createApp(routerUrl = '/') {
     filters: filtersSignal,
     persons: personsSignal,
     updateFilter: jest.fn(),
+    resetFilters: jest.fn(() => Promise.resolve()),
     config: signal(null),
     types: signal<{ id: string; count: number }[]>([]),
     loadTypeCounts: jest.fn(() => Promise.resolve()),
   };
 
+  const mockRouter = { url: routerUrl, events: NEVER, navigate: jest.fn() };
+
   TestBed.configureTestingModule({
     providers: [
       App,
-      { provide: Router, useValue: { url: routerUrl, events: NEVER } },
+      { provide: Router, useValue: mockRouter },
       { provide: GalleryStore, useValue: mockStore },
       { provide: AuthService, useValue: { isAuthenticated: jest.fn(() => true), checkStatus: jest.fn(() => Promise.resolve()) } },
       { provide: I18nService, useValue: { load: jest.fn(() => Promise.resolve()), t: jest.fn((k: string) => k) } },
@@ -40,7 +43,7 @@ function createApp(routerUrl = '/') {
     ],
   });
 
-  return { app: TestBed.inject(App), filtersSignal, personsSignal, mockStore, compareCategorySig };
+  return { app: TestBed.inject(App), filtersSignal, personsSignal, mockStore, mockRouter, compareCategorySig };
 }
 
 describe('App', () => {
@@ -263,6 +266,22 @@ describe('App', () => {
       const { app, compareCategorySig } = createApp('/');
       (app as any).onCompareCategoryChange('portrait');
       expect(compareCategorySig()).toBe('portrait');
+    });
+  });
+
+  describe('resetAllFilters', () => {
+    it('navigates to / and calls store.resetFilters', () => {
+      const { app, mockStore, mockRouter } = createApp('/');
+      (app as any).resetAllFilters();
+      expect(mockRouter.navigate).toHaveBeenCalledWith(['/']);
+      expect(mockStore.resetFilters).toHaveBeenCalled();
+    });
+
+    it('navigates to / even when on a different route', () => {
+      const { app, mockStore, mockRouter } = createApp('/stats');
+      (app as any).resetAllFilters();
+      expect(mockRouter.navigate).toHaveBeenCalledWith(['/']);
+      expect(mockStore.resetFilters).toHaveBeenCalled();
     });
   });
 });

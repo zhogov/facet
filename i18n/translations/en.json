@@ -191,7 +191,8 @@
     "subject_prominence": "Prominence",
     "subject_placement": "Placement",
     "bg_separation": "BG Separation",
-    "caption": "Caption"
+    "caption": "Caption",
+    "persons": "Persons"
   },
   "notifications": {
     "copied": "Copied!",
@@ -305,6 +306,7 @@
       "equal_quality": "Both photos are equally good (or equally bad)",
       "cant_compare": "Can't decide or photos are too different to compare",
       "suggest_weights": "Suggest optimal weights based on your comparisons",
+      "suggest_weights_disabled": "Need at least {min} comparisons ({count} so far)",
       "apply_config": "Save suggested weights to config file",
       "recalculate": "Recalculate all categories and aggregate scores using current config",
       "reset_weights": "Reset weight sliders to original values",
@@ -968,6 +970,7 @@
   },
   "nav": {
     "gallery": "Gallery",
+    "gallery_tooltip": "Gallery (double-click to reset filters)",
     "stats": "Statistics",
     "persons": "Persons",
     "compare": "Weight Tuning",
@@ -1057,12 +1060,12 @@
       "add_filter": "Add Filter...",
       "semantic_search": "Semantic Search",
       "location": "Location",
-      "persons": "Persons"
+      "persons": "Persons",
+      "smart_album_filter_notice": "Smart album — filter changes are saved automatically."
     },
     "semantic_search_info": "Semantic search loads embeddings into RAM on first use. This may take a moment for large libraries.",
     "select_on_map": "Select on map",
     "gps_radius": "Radius",
-    "gps_clear": "Clear location",
     "hide_rejected": "Hide Rejected",
     "favorites_only": "Favorites Only",
     "monochrome_only": "Monochrome Only",
@@ -1099,7 +1102,8 @@
     "subject_sharpness_range": "Subject Sharpness",
     "subject_prominence_range": "Subject Prominence",
     "subject_placement_range": "Subject Placement",
-    "bg_separation_range": "BG Separation"
+    "bg_separation_range": "BG Separation",
+    "gps_clear": "Clear location"
   },
   "composition_patterns": {
     "none": "None",
@@ -1154,7 +1158,11 @@
     "weather": "Weather",
     "fashion": "Fashion",
     "silhouette": "Silhouette",
-    "portrait_bw": "B&W Portrait"
+    "portrait_bw": "B&W Portrait",
+    "golden_hour": "Golden Hour",
+    "blue_hour": "Blue Hour",
+    "product": "Product",
+    "candid": "Candid"
   },
   "comparison": {
     "title": "Weight Tuning",
@@ -1252,9 +1260,9 @@
       "bonus": "Bonus",
       "bonus_hint": "Flat score offset added after all weighted calculations. Use to compensate for categories that systematically score lower.",
       "noise_tolerance": "Noise Tolerance",
-      "noise_tolerance_hint": "Scales the noise penalty. 1.0 = full penalty (default), 0.0 = no penalty, 0.3 = lenient (recommended for wildlife/sports).",
+      "noise_tolerance_hint": "Scales the noise penalty. 100% = full penalty (default), 0% = no penalty, 30% = lenient (recommended for wildlife/sports).",
       "clipping_multiplier": "Clipping Penalty Multiplier",
-      "clipping_multiplier_hint": "Multiplies the highlight clipping penalty. 1.0 = standard, 1.5 = stricter (default for 'default' category), 0 = disabled.",
+      "clipping_multiplier_hint": "Multiplies the highlight clipping penalty. 100% = standard, 150% = stricter (default for 'default' category), 0% = disabled.",
       "skip_clipping_penalty": "Skip clipping penalty",
       "skip_clipping_penalty_hint": "Disables the highlight clipping penalty entirely. Default: enabled for silhouette (backlit subjects).",
       "skip_oversaturation_penalty": "Skip oversaturation penalty",
@@ -1304,8 +1312,8 @@
     },
     "validation": {
       "bonus_range": "Bonus must be between -5 and 5",
-      "noise_tolerance_range": "Noise tolerance must be between 0 and 2",
-      "clipping_multiplier_range": "Clipping multiplier must be between 0 and 5",
+      "noise_tolerance_range": "Noise tolerance must be between 0% and 200%",
+      "clipping_multiplier_range": "Clipping multiplier must be between 0% and 500%",
       "ratio_range": "Value must be between 0.0 and 1.0",
       "non_negative": "Value must be 0 or greater",
       "shutter_range": "Shutter speed must be between 0 and 60 seconds",
@@ -1490,7 +1498,35 @@
       "silhouette": "silhouette detected (backlit face)",
       "tags": "matched tags: {tags}",
       "luminance": "luminance = {value} (≤ {threshold})",
-      "long_exposure": "long exposure detected"
+      "long_exposure": "long exposure detected",
+      "rejected_header": "{count} categories evaluated before",
+      "mismatch": {
+        "required_tags": "no matching tags ({tags})",
+        "excluded_tags": "has excluded tags ({tags})",
+        "has_face": "no face detected",
+        "has_face_false": "face detected",
+        "is_monochrome": "not monochrome",
+        "is_monochrome_false": "is monochrome",
+        "is_silhouette": "not a silhouette",
+        "is_silhouette_false": "is a silhouette",
+        "is_group_portrait": "not a group portrait",
+        "is_group_portrait_false": "is a group portrait",
+        "face_ratio_min": "face ratio {actual} < {required}",
+        "face_ratio_max": "face ratio {actual} > {required}",
+        "face_count_min": "face count {actual} < {required}",
+        "face_count_max": "face count {actual} > {required}",
+        "luminance_min": "luminance {actual} < {required}",
+        "luminance_max": "luminance {actual} > {required}",
+        "shutter_speed_min": "shutter speed too short",
+        "shutter_speed_max": "shutter speed too long",
+        "iso_min": "ISO {actual} < {required}",
+        "iso_max": "ISO {actual} > {required}",
+        "focal_length_min": "focal length {actual} < {required}",
+        "focal_length_max": "focal length {actual} > {required}",
+        "f_stop_min": "f-stop {actual} < {required}",
+        "f_stop_max": "f-stop {actual} > {required}",
+        "no_value": "data not available"
+      }
     },
     "penalty": {
       "blink": "Blink detected",
@@ -1530,7 +1566,8 @@
     "photos": "photos",
     "threshold": "Similarity",
     "load_more": "Load more",
-    "view_detail": "View detail"
+    "view_detail": "View detail",
+    "cancel_pass": "Cancel"
   },
   "memories": {
     "title": "On This Day",
@@ -1717,6 +1754,10 @@
     "back": "Back",
     "download": "Download",
     "downloading": "Downloading…",
+    "edit_location": "Edit location",
+    "add_location": "Add location",
+    "gps_click_to_place": "Click on the map to place a marker",
+    "gps_clear": "Clear location",
     "caption": "Caption",
     "no_caption": "No caption available",
     "persons": "Persons",

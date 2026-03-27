@@ -280,3 +280,43 @@ class TestListPersons:
         assert body["persons"][0]["id"] == 1
         assert body["persons"][0]["name"] == "Alice"
         mock_conn.close.assert_called_once()
+
+    def test_search_by_name(self, client):
+        """Searching with a text string filters by name LIKE."""
+        mock_conn = mock.MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = (1,)
+        mock_conn.execute.return_value.fetchall.return_value = []
+
+        with mock.patch(
+            "api.routers.persons.get_db_connection", return_value=mock_conn
+        ):
+            resp = client.get("/api/persons", params={"search": "alice"})
+
+        assert resp.status_code == 200
+        # The COUNT query should use name LIKE only (no ID match)
+        count_call = mock_conn.execute.call_args_list[0]
+        sql = count_call[0][0]
+        params = count_call[0][1]
+        assert "p.name LIKE ?" in sql
+        assert "p.id = ?" not in sql
+        assert params == ["%alice%"]
+
+    def test_search_by_id(self, client):
+        """Searching with a numeric string also matches person ID."""
+        mock_conn = mock.MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = (1,)
+        mock_conn.execute.return_value.fetchall.return_value = []
+
+        with mock.patch(
+            "api.routers.persons.get_db_connection", return_value=mock_conn
+        ):
+            resp = client.get("/api/persons", params={"search": "42"})
+
+        assert resp.status_code == 200
+        # The COUNT query should use both name LIKE and ID match
+        count_call = mock_conn.execute.call_args_list[0]
+        sql = count_call[0][0]
+        params = count_call[0][1]
+        assert "p.name LIKE ?" in sql
+        assert "p.id = ?" in sql
+        assert params == ["%42%", 42]

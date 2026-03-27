@@ -191,7 +191,8 @@
     "subject_prominence": "Proéminence",
     "subject_placement": "Placement",
     "bg_separation": "Séparation fond",
-    "caption": "Légende"
+    "caption": "Légende",
+    "persons": "Personnes"
   },
   "notifications": {
     "copied": "Copie !",
@@ -305,6 +306,7 @@
       "equal_quality": "Les deux photos sont de qualite egale (ou egalement mauvaises)",
       "cant_compare": "Impossible de decider ou photos trop differentes pour comparer",
       "suggest_weights": "Suggerer des poids optimaux bases sur vos comparaisons",
+      "suggest_weights_disabled": "Il faut au moins {min} comparaisons ({count} pour l'instant)",
       "apply_config": "Sauvegarder les poids suggeres dans le fichier de configuration",
       "recalculate": "Recalculer toutes les categories et scores agreges avec la configuration actuelle",
       "reset_weights": "Reinitialiser les curseurs de poids aux valeurs d'origine",
@@ -968,6 +970,7 @@
   },
   "nav": {
     "gallery": "Galerie",
+    "gallery_tooltip": "Galerie (double-clic pour réinitialiser les filtres)",
     "stats": "Statistiques",
     "persons": "Personnes",
     "compare": "Reglage des poids",
@@ -1056,12 +1059,12 @@
       "add_filter": "Ajouter un filtre...",
       "semantic_search": "Recherche sémantique",
       "location": "Localisation",
-      "persons": "Personnes"
+      "persons": "Personnes",
+      "smart_album_filter_notice": "Album intelligent — les filtres sont enregistrés automatiquement."
     },
     "semantic_search_info": "La recherche sémantique charge les embeddings en mémoire au premier usage. Cela peut prendre un moment pour les grandes bibliothèques.",
     "select_on_map": "Sélectionner sur la carte",
     "gps_radius": "Rayon",
-    "gps_clear": "Effacer la localisation",
     "hide_rejected": "Masquer rejetes",
     "favorites_only": "Favoris uniquement",
     "monochrome_only": "Monochrome uniquement",
@@ -1098,7 +1101,8 @@
     "subject_sharpness_range": "Netteté du sujet",
     "subject_prominence_range": "Proéminence du sujet",
     "subject_placement_range": "Placement du sujet",
-    "bg_separation_range": "Séparation fond"
+    "bg_separation_range": "Séparation fond",
+    "gps_clear": "Supprimer la position"
   },
   "composition_patterns": {
     "none": "Aucun",
@@ -1153,7 +1157,11 @@
     "weather": "Meteo",
     "fashion": "Mode",
     "silhouette": "Silhouette",
-    "portrait_bw": "Portrait N&B"
+    "portrait_bw": "Portrait N&B",
+    "golden_hour": "Heure dorée",
+    "blue_hour": "Heure bleue",
+    "product": "Produit",
+    "candid": "Spontané"
   },
   "comparison": {
     "title": "Reglage des poids",
@@ -1255,11 +1263,13 @@
       "skip_oversaturation_penalty": "Ignorer la pénalité de sursaturation",
       "apply_blink_penalty": "Appliquer la pénalité de clignement",
       "bonus_hint": "Décalage fixe du score ajouté après tous les calculs pondérés.",
-      "noise_tolerance_hint": "Échelle de la pénalité de bruit. 1.0 = pénalité complète (défaut), 0.0 = aucune pénalité, 0.3 = indulgent.",
-      "clipping_multiplier_hint": "Multiplie la pénalité d'écrêtage des hautes lumières. 1.0 = standard, 1.5 = plus strict, 0 = désactivé.",
+      "noise_tolerance_hint": "Échelle de la pénalité de bruit. 100% = pénalité complète (défaut), 0% = aucune pénalité, 30% = indulgent.",
+      "clipping_multiplier_hint": "Multiplie la pénalité d'écrêtage des hautes lumières. 100% = standard, 150% = plus strict, 0% = désactivé.",
       "skip_clipping_penalty_hint": "Désactive la pénalité d'écrêtage des hautes lumières. Par défaut : activé pour silhouette.",
       "skip_oversaturation_penalty_hint": "Désactive la pénalité de sursaturation. Par défaut : activé pour nuit, astro, concert.",
-      "apply_blink_penalty_hint": "Applique un multiplicateur de score en cas de clignement. Par défaut : activé pour les catégories portrait."
+      "apply_blink_penalty_hint": "Applique un multiplicateur de score en cas de clignement. Par défaut : activé pour les catégories portrait.",
+      "noise_tolerance_range": "0% = pas de pénalité, 100% = pénalité complète (défaut), 200% = double pénalité",
+      "clipping_multiplier_range": "0% = désactivé, 100% = standard (défaut), 500% = très strict"
     },
     "filters": "Filtres",
     "filters_description": "Conditions d'affectation à une catégorie",
@@ -1303,8 +1313,8 @@
     },
     "validation": {
       "bonus_range": "Le bonus doit être compris entre -5 et 5",
-      "noise_tolerance_range": "La tolérance au bruit doit être entre 0 et 2",
-      "clipping_multiplier_range": "Le multiplicateur d'écrêtage doit être entre 0 et 5",
+      "noise_tolerance_range": "La tolerance au bruit doit etre entre 0% et 200%",
+      "clipping_multiplier_range": "Le multiplicateur d'ecretage doit etre entre 0% et 500%",
       "ratio_range": "La valeur doit être entre 0,0 et 1,0",
       "non_negative": "La valeur doit être 0 ou supérieure",
       "shutter_range": "La vitesse d'obturation doit être entre 0 et 60 secondes",
@@ -1489,7 +1499,35 @@
       "silhouette": "silhouette detectee (visage a contre-jour)",
       "tags": "tags correspondants : {tags}",
       "luminance": "luminosite = {value} (≤ {threshold})",
-      "long_exposure": "longue exposition detectee"
+      "long_exposure": "longue exposition detectee",
+      "rejected_header": "{count} catégories évaluées avant",
+      "mismatch": {
+        "required_tags": "pas de tags correspondants ({tags})",
+        "excluded_tags": "tags exclus présents ({tags})",
+        "has_face": "aucun visage détecté",
+        "has_face_false": "visage détecté",
+        "is_monochrome": "pas monochrome",
+        "is_monochrome_false": "est monochrome",
+        "is_silhouette": "pas une silhouette",
+        "is_silhouette_false": "est une silhouette",
+        "is_group_portrait": "pas un portrait de groupe",
+        "is_group_portrait_false": "est un portrait de groupe",
+        "face_ratio_min": "ratio visage {actual} < {required}",
+        "face_ratio_max": "ratio visage {actual} > {required}",
+        "face_count_min": "nombre de visages {actual} < {required}",
+        "face_count_max": "nombre de visages {actual} > {required}",
+        "luminance_min": "luminance {actual} < {required}",
+        "luminance_max": "luminance {actual} > {required}",
+        "shutter_speed_min": "vitesse d'obturation trop courte",
+        "shutter_speed_max": "vitesse d'obturation trop longue",
+        "iso_min": "ISO {actual} < {required}",
+        "iso_max": "ISO {actual} > {required}",
+        "focal_length_min": "focale {actual} < {required}",
+        "focal_length_max": "focale {actual} > {required}",
+        "f_stop_min": "ouverture {actual} < {required}",
+        "f_stop_max": "ouverture {actual} > {required}",
+        "no_value": "donnée non disponible"
+      }
     },
     "penalty": {
       "blink": "Clignement detecte",
@@ -1529,7 +1567,8 @@
     "photos": "photos",
     "threshold": "Similarité",
     "load_more": "Charger plus",
-    "view_detail": "Voir le détail"
+    "view_detail": "Voir le détail",
+    "cancel_pass": "Annuler"
   },
   "memories": {
     "title": "Ce jour-là",
@@ -1716,6 +1755,10 @@
     "back": "Retour",
     "download": "Télécharger",
     "downloading": "Téléchargement…",
+    "edit_location": "Modifier la position",
+    "add_location": "Ajouter une position",
+    "gps_click_to_place": "Cliquez sur la carte pour placer un marqueur",
+    "gps_clear": "Supprimer la position",
     "caption": "Légende",
     "no_caption": "Aucune légende disponible",
     "persons": "Personnes",

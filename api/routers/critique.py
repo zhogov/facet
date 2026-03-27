@@ -18,6 +18,13 @@ from api.model_cache import get_or_load_vlm_tagger
 router = APIRouter(tags=["critique"])
 logger = logging.getLogger(__name__)
 
+# Score thresholds for strength/weakness classification
+_STRENGTH_THRESHOLD = 7.5
+_WEAKNESS_THRESHOLD = 5.0
+# Noise thresholds
+_NOISE_CLEAN_THRESHOLD = 3.0
+_NOISE_HIGH_THRESHOLD = 8.0
+
 # Metric labels for human-readable output
 METRIC_LABELS = {
     'aesthetic': 'Aesthetic Quality',
@@ -94,13 +101,48 @@ SUGGESTIONS = {
 }
 
 
-def _build_category_reason(photo, category, config):
+def _build_category_trail(photo, matched_category, sc):
+    """Build list of interesting rejected categories evaluated before the match.
+
+    Only includes categories where the rejection is non-trivial (not just
+    'no matching tags for a tag-only category').
+    """
+    from config.category_filter import CategoryFilter
+
+    rejected = []
+    for cat in sc.get_categories():
+        name = cat.get('name')
+        if name == matched_category:
+            break
+
+        filters = cat.get('filters', {})
+        if not filters:
+            continue
+
+        cf = CategoryFilter(filters)
+        mismatch = cf.explain_mismatch(photo)
+        if mismatch is None:
+            continue
+
+        # Skip trivially irrelevant tag-only categories: if the only filters
+        # are tag-related and none of the required tags appear in the photo
+        filter_keys = set(filters.keys()) - {'tag_match_mode'}
+        is_tag_only = filter_keys <= {'required_tags', 'excluded_tags'}
+        if is_tag_only and mismatch['key'] == 'required_tags' and not mismatch.get('actual'):
+            continue
+
+        rejected.append({'category': name, 'mismatch': mismatch})
+        if len(rejected) >= 5:
+            break
+
+    return rejected
+
+
+def _build_category_reason(photo, category, sc):
     """Build structured category reason for i18n on the frontend."""
-    from config import ScoringConfig
-    sc = ScoringConfig()
     cat_config = sc.get_category_config(category)
     if not cat_config:
-        return {'reason_key': 'default', 'category': category or 'default', 'details': []}
+        return {'reason_key': 'default', 'category': category or 'default', 'details': [], 'rejected': []}
 
     filters = cat_config.get('filters', {})
     details = []
@@ -135,28 +177,26 @@ def _build_category_reason(photo, category, config):
     if 'shutter_speed_min' in filters and photo.get('shutter_speed'):
         details.append({'key': 'long_exposure'})
 
+    rejected = _build_category_trail(photo, category, sc)
+
     return {
         'reason_key': 'matched' if details else 'matched_generic',
         'category': category,
         'details': details,
+        'rejected': rejected,
     }
 
 
-def _build_rule_critique(photo):
-    """Build a rule-based critique from stored metrics."""
-    from config import ScoringConfig
+def _calculate_breakdown(photo, sc, category):
+    """Calculate score breakdown from photo metrics and category weights.
 
-    sc = ScoringConfig()
-    category = photo.get('category', '')
+    Returns a sorted list of score contributions with metric details.
+    """
     weights = sc.get_weights(category)
-
     if not weights:
         weights = sc.get_weights('')
 
-    # Build score breakdown
     breakdown = []
-    total_weight = 0
-    weighted_sum = 0
 
     for weight_key, weight_val in weights.items():
         if weight_key in ('bonus', 'blink_penalty', 'noise_tolerance_multiplier',
@@ -174,7 +214,6 @@ def _build_rule_critique(photo):
         if value is None:
             continue
 
-        # For noise_sigma, the score is inverted (lower is better)
         display_value = float(value)
         contribution = display_value * weight_val
 
@@ -185,12 +224,17 @@ def _build_rule_critique(photo):
             'weight': round(weight_val, 3),
             'contribution': round(contribution, 2),
         })
-        total_weight += weight_val
-        weighted_sum += contribution
 
     breakdown.sort(key=lambda x: x['contribution'], reverse=True)
+    return breakdown
 
-    # Identify strengths and weaknesses (structured for i18n)
+
+def _identify_strengths_weaknesses(breakdown):
+    """Identify strengths and weaknesses from a score breakdown.
+
+    Returns a (strengths, weaknesses, suggestions) tuple. Strengths and weaknesses
+    are lists of dicts with metric_key and value; suggestions is a list of metric keys.
+    """
     strengths = []
     weaknesses = []
     suggestions = []
@@ -199,25 +243,32 @@ def _build_rule_critique(photo):
         val = item['value']
         metric_key = item['metric_key']
 
-        # Noise is inverted — high noise_sigma is bad
+        # Noise is inverted -- high noise_sigma is bad
         if metric_key == 'noise_sigma':
-            if val < 3:
+            if val < _NOISE_CLEAN_THRESHOLD:
                 strengths.append({'metric_key': metric_key, 'value': round(val, 1)})
-            elif val > 8:
+            elif val > _NOISE_HIGH_THRESHOLD:
                 weaknesses.append({'metric_key': metric_key, 'value': round(val, 1)})
                 if metric_key in SUGGESTIONS:
                     suggestions.append(metric_key)
         elif metric_key in ('mean_saturation', 'mean_luminance'):
             continue  # Not meaningful as strengths/weaknesses
         else:
-            if val >= 7.5:
+            if val >= _STRENGTH_THRESHOLD:
                 strengths.append({'metric_key': metric_key, 'value': round(val, 1)})
-            elif val < 5.0 and item['weight'] > 0.05:
+            elif val < _WEAKNESS_THRESHOLD and item['weight'] > 0.05:
                 weaknesses.append({'metric_key': metric_key, 'value': round(val, 1)})
                 if metric_key in SUGGESTIONS:
                     suggestions.append(metric_key)
 
-    # Check for penalties
+    return strengths, weaknesses, suggestions
+
+
+def _check_penalties(photo):
+    """Check for scoring penalties (blink, noise, clipping).
+
+    Returns a dict of penalty names to values.
+    """
     penalties = {}
     if photo.get('is_blink'):
         penalties['blink'] = True
@@ -229,7 +280,19 @@ def _build_rule_critique(photo):
         penalties['highlight_clipping'] = round(-photo['highlight_clipped'] * 1.0, 2)
     if photo.get('shadow_clipped') and photo['shadow_clipped'] > 0:
         penalties['shadow_clipping'] = round(-photo['shadow_clipped'] * 0.5, 2)
+    return penalties
 
+
+def _build_rule_critique(photo):
+    """Build a rule-based critique from stored metrics."""
+    from config import ScoringConfig
+
+    sc = ScoringConfig()
+    category = photo.get('category', '')
+
+    breakdown = _calculate_breakdown(photo, sc, category)
+    strengths, weaknesses, suggestions = _identify_strengths_weaknesses(breakdown)
+    penalties = _check_penalties(photo)
     category_reason = _build_category_reason(photo, category, sc)
 
     return {
@@ -274,7 +337,9 @@ async def api_critique(
             'subject_sharpness', 'subject_prominence', 'subject_placement',
             'bg_separation', 'mean_saturation', 'mean_luminance',
             'face_ratio', 'face_count', 'is_monochrome', 'is_blink',
+            'is_silhouette', 'is_group_portrait',
             'highlight_clipped', 'shadow_clipped', 'tags', 'shutter_speed',
+            'focal_length', 'f_stop', 'iso',
         ]
         col_str = ', '.join(critique_cols)
         photo = conn.execute(

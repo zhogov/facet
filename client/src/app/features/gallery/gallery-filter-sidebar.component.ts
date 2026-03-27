@@ -10,6 +10,8 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatInputModule } from '@angular/material/input';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatExpansionModule } from '@angular/material/expansion';
+import { MatDatepickerModule, MatDatepickerInputEvent } from '@angular/material/datepicker';
+import { toIsoDateString } from '../../shared/utils/date-format';
 import { MatAutocompleteModule, MatAutocompleteSelectedEvent } from '@angular/material/autocomplete';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { firstValueFrom } from 'rxjs';
@@ -134,13 +136,53 @@ function saveSectionStates(states: Record<string, boolean>): void {
     MatTooltipModule,
     MatAutocompleteModule,
     MatExpansionModule,
+    MatDatepickerModule,
     MatDialogModule,
     TranslatePipe,
     FilterDisplayPipe,
     PersonThumbnailUrlPipe,
   ],
   template: `
-<div data-scroll class="overflow-y-auto px-2 pt-4 lg:pt-0 pb-4 h-full">
+<div data-scroll class="overflow-y-auto px-2 pt-4 lg:pt-3 pb-4 h-full">
+
+      <!-- Semantic Search (top of sidebar) -->
+      @if (store.config()?.features?.show_semantic_search) {
+        <mat-expansion-panel class="!mb-1" [expanded]="sectionStates()['semantic'] === true"
+                             (opened)="onSectionToggle('semantic', true)"
+                             (closed)="onSectionToggle('semantic', false)"
+                             [style.background-color]="sectionStates()['semantic'] === true ? 'var(--mat-sys-surface-container)' : null">
+          <mat-expansion-panel-header>
+            <mat-panel-title class="flex items-center gap-2">
+              <mat-icon class="!text-base !w-5 !h-5 !leading-5 opacity-60">image_search</mat-icon>
+              {{ 'gallery.sidebar.semantic_search' | translate }}
+            </mat-panel-title>
+          </mat-expansion-panel-header>
+          <div class="flex flex-col gap-2 pb-2">
+            <mat-form-field subscriptSizing="dynamic" class="w-full">
+              <mat-label>{{ 'gallery.semantic_search' | translate }}</mat-label>
+              <mat-icon matPrefix class="mr-1 opacity-60">image_search</mat-icon>
+              <input matInput
+                [value]="store.filters().semanticQuery"
+                (input)="onSemanticSearch($event)"
+                [placeholder]="'gallery.semantic_search_placeholder' | translate" />
+              @if (store.filters().semanticQuery) {
+                <button matSuffix mat-icon-button class="!w-6 !h-6 !p-0" (click)="store.updateFilter('semanticQuery', '')">
+                  <mat-icon class="!text-sm !w-4 !h-4">close</mat-icon>
+                </button>
+              }
+            </mat-form-field>
+            <p class="text-xs opacity-50 px-1">{{ 'gallery.semantic_search_info' | translate }}</p>
+          </div>
+        </mat-expansion-panel>
+      }
+
+      <!-- Smart album filter notice -->
+      @if (store.currentAlbum()?.is_smart && auth.isEdition()) {
+        <div class="flex items-start gap-2 rounded-lg bg-[var(--mat-sys-tertiary-container)] text-[var(--mat-sys-on-tertiary-container)] text-xs px-3 py-2 mb-2">
+          <mat-icon class="!text-base !w-4 !h-4 !leading-4 shrink-0 mt-0.5">info</mat-icon>
+          <span>{{ 'gallery.sidebar.smart_album_filter_notice' | translate }}</span>
+        </div>
+      }
 
       <!-- Search (visible below 2xl, hidden on 2xl+ where header search is shown) -->
       <div class="!hidden lg:!block 2xl:!hidden mt-4 mb-1">
@@ -231,11 +273,15 @@ function saveSectionStates(states: Record<string, boolean>): void {
         <div class="flex flex-col gap-2 pb-2">
           <mat-form-field subscriptSizing="dynamic" class="w-full">
             <mat-label>{{ 'gallery.date_from' | translate }}</mat-label>
-            <input matInput type="date" [value]="store.filters().date_from" (change)="onDateChange('date_from', $event)" />
+            <input matInput [matDatepicker]="fromDp" [value]="store.filters().date_from" (dateChange)="onDateChange('date_from', $event)" />
+            <mat-datepicker-toggle matIconSuffix [for]="fromDp" />
+            <mat-datepicker #fromDp />
           </mat-form-field>
           <mat-form-field subscriptSizing="dynamic" class="w-full">
             <mat-label>{{ 'gallery.date_to' | translate }}</mat-label>
-            <input matInput type="date" [value]="store.filters().date_to" (change)="onDateChange('date_to', $event)" />
+            <input matInput [matDatepicker]="toDp" [value]="store.filters().date_to" (dateChange)="onDateChange('date_to', $event)" />
+            <mat-datepicker-toggle matIconSuffix [for]="toDp" />
+            <mat-datepicker #toDp />
           </mat-form-field>
         </div>
       </mat-expansion-panel>
@@ -350,10 +396,12 @@ function saveSectionStates(states: Record<string, boolean>): void {
           </mat-panel-title>
         </mat-expansion-panel-header>
         <div class="flex flex-col gap-2 pb-2">
-          <mat-checkbox
-            [checked]="store.filters().hide_details"
-            (change)="store.updateFilter('hide_details', $event.checked)"
-          >{{ 'gallery.hide_details' | translate }}</mat-checkbox>
+          @if (store.galleryMode() !== 'mosaic') {
+            <mat-checkbox
+              [checked]="store.filters().hide_details"
+              (change)="store.updateFilter('hide_details', $event.checked)"
+            >{{ 'gallery.hide_details' | translate }}</mat-checkbox>
+          }
           <mat-checkbox class="!hidden lg:!block"
             [checked]="store.filters().hide_tooltip"
             (change)="store.updateFilter('hide_tooltip', $event.checked)"
@@ -512,37 +560,6 @@ function saveSectionStates(states: Record<string, boolean>): void {
         </mat-expansion-panel>
       }
 
-      <!-- Semantic Search (in accordion, below metric filters) -->
-      @if (store.config()?.features?.show_semantic_search) {
-        <mat-expansion-panel class="!mb-1" [expanded]="sectionStates()['semantic'] === true"
-                             (opened)="onSectionToggle('semantic', true)"
-                             (closed)="onSectionToggle('semantic', false)"
-                             [style.background-color]="sectionStates()['semantic'] === true ? 'var(--mat-sys-surface-container)' : null">
-          <mat-expansion-panel-header>
-            <mat-panel-title class="flex items-center gap-2">
-              <mat-icon class="!text-base !w-5 !h-5 !leading-5 opacity-60">image_search</mat-icon>
-              {{ 'gallery.sidebar.semantic_search' | translate }}
-            </mat-panel-title>
-          </mat-expansion-panel-header>
-          <div class="flex flex-col gap-2 pb-2">
-            <mat-form-field subscriptSizing="dynamic" class="w-full">
-              <mat-label>{{ 'gallery.semantic_search' | translate }}</mat-label>
-              <mat-icon matPrefix class="mr-1 opacity-60">image_search</mat-icon>
-              <input matInput
-                [value]="store.filters().semanticQuery"
-                (input)="onSemanticSearch($event)"
-                [placeholder]="'gallery.semantic_search_placeholder' | translate" />
-              @if (store.filters().semanticQuery) {
-                <button matSuffix mat-icon-button class="!w-6 !h-6 !p-0" (click)="store.updateFilter('semanticQuery', '')">
-                  <mat-icon class="!text-sm !w-4 !h-4">close</mat-icon>
-                </button>
-              }
-            </mat-form-field>
-            <p class="text-xs opacity-50 px-1">{{ 'gallery.semantic_search_info' | translate }}</p>
-          </div>
-        </mat-expansion-panel>
-      }
-
       <!-- Save as smart album -->
       @if (store.config()?.features?.show_albums && auth.isEdition() && store.activeFilterCount() > 0 && !store.filters().album_id) {
         <div class="py-3 px-1">
@@ -643,9 +660,8 @@ export class GalleryFilterSidebarComponent {
     this.store.updateFilter(key as 'min_score', filterValue);
   }
 
-  onDateChange(key: 'date_from' | 'date_to', event: Event): void {
-    const value = (event.target as HTMLInputElement).value;
-    this.store.updateFilter(key, value);
+  onDateChange(key: 'date_from' | 'date_to', event: MatDatepickerInputEvent<Date>): void {
+    this.store.updateFilter(key, toIsoDateString(event.value));
   }
 
   private searchTimeout: ReturnType<typeof setTimeout> | null = null;
