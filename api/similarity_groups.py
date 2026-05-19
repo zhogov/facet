@@ -76,13 +76,19 @@ def compute_similarity_groups(conn=None, threshold=None, min_size=None, user_id=
                 pass  # Cache corrupted, recompute
 
         # Load embeddings — cap for performance (O(n²) computation)
-        # Exclude burst non-leads to avoid overlap with burst culling
-        # Exclude similarity_reviewed photos so reviewed groups don't reappear
+        # Exclude burst non-leads to avoid overlap with burst culling.
+        # similarity_reviewed clause omitted when the column is absent on legacy DBs.
+        from api.db_helpers import get_existing_columns
+        existing_cols = get_existing_columns(conn)
+        reviewed_clause = (
+            "AND (similarity_reviewed IS NULL OR similarity_reviewed = 0)"
+            if "similarity_reviewed" in existing_cols else ""
+        )
         rows = conn.execute(
             f"""SELECT path, clip_embedding, aggregate FROM photos
                WHERE clip_embedding IS NOT NULL
                  AND (is_burst_lead = 1 OR is_burst_lead IS NULL)
-                 AND (similarity_reviewed IS NULL OR similarity_reviewed = 0)
+                 {reviewed_clause}
                  AND {vis_sql}
                ORDER BY date_taken DESC
                LIMIT ?""",
