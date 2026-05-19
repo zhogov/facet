@@ -153,7 +153,7 @@ def is_photo_tags_available(conn=None):
     try:
         row = conn.execute("SELECT COUNT(*) FROM photo_tags").fetchone()
         result = row[0] > 0 if row else False
-    except Exception:
+    except sqlite3.OperationalError:
         logger.debug("photo_tags table not available", exc_info=True)
         result = False
 
