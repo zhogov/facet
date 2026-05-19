@@ -104,23 +104,31 @@ def _load_text_encoder():
 
 
 def _encode_text(query: str) -> np.ndarray:
-    """Encode a text query into a normalized embedding vector."""
+    """Encode a single text query into a normalized embedding vector (1D)."""
+    return _encode_texts([query])[0]
+
+
+def _encode_texts(queries: list[str]) -> np.ndarray:
+    """Encode a batch of text queries into normalized embeddings.
+
+    Returns a (N, D) float32 array, L2-normalized along the last axis.
+    """
     import torch
 
     enc = _load_text_encoder()
 
     with torch.no_grad():
         if enc['backend'] == 'transformers':
-            inputs = enc['tokenizer']([query], padding=True, return_tensors="pt").to(enc['device'])
+            inputs = enc['tokenizer'](list(queries), padding=True, return_tensors="pt").to(enc['device'])
             text_features = enc['model'].get_text_features(**inputs)
             if not isinstance(text_features, torch.Tensor):
                 text_features = text_features.pooler_output
         else:
-            tokens = enc['tokenizer']([query]).to(enc['device'])
+            tokens = enc['tokenizer'](list(queries)).to(enc['device'])
             text_features = enc['model'].encode_text(tokens)
 
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-        return text_features.cpu().numpy().flatten().astype(np.float32)
+        return text_features.cpu().numpy().astype(np.float32)
 
 
 def _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params):

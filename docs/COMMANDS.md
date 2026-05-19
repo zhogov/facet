@@ -93,6 +93,13 @@ Three additional PyIQA models provide specialized scoring beyond the primary TOP
 
 These models share VRAM with the primary TOPIQ model and run as part of the default multi-pass pipeline.
 
+### Benchmarks & supplementary scores
+
+| Command | Description |
+|---------|-------------|
+| `python scripts/compute_aesthetic_clip.py --db <path>` | Populate the `aesthetic_clip` column by projecting cached CLIP/SigLIP embeddings onto a text-derived aesthetic axis. Zero extra image inference. Not part of the default `aggregate`. See [docs/SCORING.md](SCORING.md#supplementary-signals-not-in-default-aggregate). |
+| `python scripts/benchmark_aesthetic.py --db <path> --ava AVA.txt --photo-dir <dir>` | Compute SRCC + PLCC against the AVA mean-opinion-score ground truth for every populated score column in the DB. Useful when adding or tuning a model variant. |
+
 ### Subject Saliency
 
 The `--pass saliency` and `--recompute-saliency` commands use BiRefNet-dynamic (`ZhengPeng7/BiRefNet_dynamic` from HuggingFace, via the `transformers` library) to generate a binary subject mask, then derive four metrics:

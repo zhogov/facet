@@ -168,6 +168,12 @@ Three additional quality models that complement the primary aesthetic score:
 
 These models run automatically as part of the default scoring pipeline and share VRAM with the primary TOPIQ model. Add their weight keys to any category where the specialized assessment is valuable.
 
+### Supplementary signals (not in default aggregate)
+
+| Column | Source | Description |
+|--------|--------|-------------|
+| `aesthetic_clip` | `analyzers/aesthetic_clip.py` + cached CLIP/SigLIP embedding | A free supplementary aesthetic score (0-10) derived from cached image embeddings by projecting onto an "aesthetic axis" built from positive/negative text prompts. Zero extra image inference at scan time. **Not** part of the default `aggregate`. Populate with `python scripts/compute_aesthetic_clip.py --db <path>`. Benchmark with `python scripts/benchmark_aesthetic.py --db <path> --ava AVA.txt --photo-dir <dir>`. AVA SRCC ≈ 0.52 on the 500-photo `ava_test/` set (vs 0.94 for `aesthetic_iaa`) — useful as a cheap pre-filter or when TOPIQ-IAA is unavailable. |
+
 ## Category Tags (CLIP Vocabulary)
 
 Tags trigger tag-based categories and are matched using CLIP similarity:

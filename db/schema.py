@@ -94,6 +94,7 @@ PHOTOS_COLUMNS = [
     ('aesthetic_iaa', 'REAL'),       # TOPIQ IAA (AVA-trained aesthetic merit)
     ('face_quality_iqa', 'REAL'),    # TOPIQ NR-Face (dedicated face quality)
     ('liqe_score', 'REAL'),          # LIQE quality score
+    ('aesthetic_clip', 'REAL'),      # CLIP/SigLIP text-projection aesthetic (supplementary, free from cached embedding)
 
     # Subject saliency metrics (BiRefNet)
     ('subject_sharpness', 'REAL'),   # Laplacian variance on subject mask
