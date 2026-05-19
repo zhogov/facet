@@ -1,24 +1,23 @@
-"""Tests for the albums API router (api/routers/albums.py)."""
+"""Tests for the albums API router (api/routers/albums.py).
+
+Uses the shared ``edition_client`` fixture from ``tests/conftest.py`` — see
+that file for why dependency_overrides is the only pattern that works for
+FastAPI Depends() chains.
+"""
 
 from contextlib import nullcontext
 from unittest import mock
 
 import pytest
-from fastapi.testclient import TestClient
 
-from api import create_app
-from api.auth import CurrentUser, require_authenticated, require_edition
+from api.auth import CurrentUser
 
 
+# Alias the shared fixture so existing ``def test_X(self, client)`` signatures
+# work without a mechanical rename pass.
 @pytest.fixture()
-def client():
-    app = create_app()
-    app.dependency_overrides[require_edition] = lambda: CurrentUser(edition_authenticated=True)
-    app.dependency_overrides[require_authenticated] = lambda: CurrentUser(edition_authenticated=True)
-    try:
-        yield TestClient(app)
-    finally:
-        app.dependency_overrides.clear()
+def client(edition_client):
+    return edition_client
 
 
 def _make_album_row(

@@ -1,13 +1,14 @@
-"""Tests for the persons API router (api/routers/persons.py)."""
+"""Tests for the persons API router (api/routers/persons.py).
+
+Uses the shared ``edition_client`` fixture from ``tests/conftest.py`` — see
+that file for why dependency_overrides is the only pattern that works for
+FastAPI Depends() chains.
+"""
 
 from contextlib import contextmanager
 from unittest import mock
 
 import pytest
-from fastapi.testclient import TestClient
-
-from api import create_app
-from api.auth import CurrentUser, require_authenticated, require_edition
 
 
 def _cm(conn):
@@ -17,15 +18,12 @@ def _cm(conn):
     return _ctx()
 
 
+# Alias the shared fixture under the local name ``client`` so the existing
+# test signatures (``def test_X(self, client)``) keep working without a
+# mechanical rename pass.
 @pytest.fixture()
-def client():
-    app = create_app()
-    app.dependency_overrides[require_edition] = lambda: CurrentUser(edition_authenticated=True)
-    app.dependency_overrides[require_authenticated] = lambda: CurrentUser(edition_authenticated=True)
-    try:
-        yield TestClient(app)
-    finally:
-        app.dependency_overrides.clear()
+def client(edition_client):
+    return edition_client
 
 
 class TestMergePersons:
