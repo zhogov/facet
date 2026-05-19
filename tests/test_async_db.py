@@ -6,10 +6,7 @@ cleanly. Required before migrating any endpoint to async — if these fail,
 the larger conversion would fail with no clear signal.
 """
 
-import asyncio
-import os
 import sqlite3
-import tempfile
 from unittest import mock
 
 import pytest

@@ -350,17 +350,16 @@ async def select_similar_photos(
                     reject_paths + vis_params,
                 )
 
-            # Mark ALL photos in the group as similarity_reviewed (when the
-            # column exists; legacy DBs without the column silently skip this).
-            from api.db_helpers import get_existing_columns
-            if "similarity_reviewed" in get_existing_columns(conn):
-                all_paths = list(group_paths)
-                if all_paths:
-                    placeholders = ','.join('?' * len(all_paths))
-                    conn.execute(
-                        f"UPDATE photos SET similarity_reviewed = 1 WHERE path IN ({placeholders}) AND {vis_sql}",
-                        all_paths + vis_params,
-                    )
+            # Mark ALL photos in the group as similarity_reviewed. The column
+            # is guaranteed present by the lifespan-time init_database() migration
+            # (see api/__init__.py:lifespan and db/schema.py:PHOTOS_COLUMNS).
+            all_paths = list(group_paths)
+            if all_paths:
+                placeholders = ','.join('?' * len(all_paths))
+                conn.execute(
+                    f"UPDATE photos SET similarity_reviewed = 1 WHERE path IN ({placeholders}) AND {vis_sql}",
+                    all_paths + vis_params,
+                )
 
             conn.commit()
             return {'status': 'ok', 'kept': len(keep_set), 'rejected': len(reject_paths)}

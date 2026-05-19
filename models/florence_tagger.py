@@ -11,7 +11,7 @@ edit-distance matching.
 
 import logging
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import PIL.Image
 
 logger = logging.getLogger("facet.florence")

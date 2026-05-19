@@ -8,7 +8,7 @@ Supports PyIQA, Qwen2-VL, and CLIP models with automatic selection.
 import logging
 import os
 import sys
-from typing import Optional, Dict, Any, List, Union
+from typing import Dict, List
 from pathlib import Path
 
 logger = logging.getLogger("facet.models")
@@ -224,7 +224,6 @@ class ModelManager:
         logger.info("Loading CLIP+MLP aesthetic predictor...")
         try:
             import open_clip
-            import torch.nn as nn
 
             # MLP head requires ViT-L-14 768-dim embeddings — always use legacy config
             clip_config = self.model_settings.get('clip_legacy',
@@ -255,7 +254,6 @@ class ModelManager:
     def _load_aesthetic_mlp(self):
         """Load the MLP head for aesthetic prediction."""
         import torch.nn as nn
-        from pathlib import Path
         import urllib.request
 
         class AestheticMLP(nn.Module):

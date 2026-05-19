@@ -1,6 +1,6 @@
 """Tests for the memories endpoint (api/routers/memories.py)."""
 
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager
 from unittest import mock
 
 import pytest

@@ -207,7 +207,11 @@ interface AppConfig {
             <div class="flex gap-0.5 flex-wrap mt-0.5">
               @for (tag of photo().tags_list; track tag) {
                 <span class="px-1.5 py-0.5 bg-[var(--facet-accent-badge)] text-[var(--facet-accent-text)] rounded text-[11px] cursor-pointer hover:bg-[var(--facet-accent-dim)] transition-colors"
-                      (click)="tagClicked.emit(tag); $event.stopPropagation()">
+                      role="button"
+                      tabindex="0"
+                      (click)="tagClicked.emit(tag); $event.stopPropagation()"
+                      (keydown.enter)="tagClicked.emit(tag); $event.stopPropagation()"
+                      (keydown.space)="tagClicked.emit(tag); $event.preventDefault(); $event.stopPropagation()">
                   {{ tag }}
                 </span>
               }
@@ -229,7 +233,11 @@ interface AppConfig {
                        class="w-8 h-8 rounded-full border border-neutral-700 object-cover cursor-pointer"
                        [alt]="person.name"
                        [matTooltip]="person.name"
-                       (click)="personFilterClicked.emit(person.id); $event.stopPropagation()" />
+                       role="button"
+                       tabindex="0"
+                       (click)="personFilterClicked.emit(person.id); $event.stopPropagation()"
+                       (keydown.enter)="personFilterClicked.emit(person.id); $event.stopPropagation()"
+                       (keydown.space)="personFilterClicked.emit(person.id); $event.preventDefault(); $event.stopPropagation()" />
                 }
               }
             </div>

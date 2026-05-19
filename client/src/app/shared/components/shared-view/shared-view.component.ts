@@ -319,7 +319,7 @@ interface SharedFilters {
                 <div class="flex flex-col gap-1 pb-1">
                   @for (def of group.filters; track def.id) {
                     <div class="flex flex-col gap-0">
-                      <label class="text-xs opacity-60 px-1">{{ def.labelKey | translate }}</label>
+                      <span class="text-xs opacity-60 px-1">{{ def.labelKey | translate }}</span>
                       <div class="flex items-center gap-1">
                         <mat-slider [min]="def.sliderMin" [max]="def.sliderMax" [step]="def.step" class="flex-1">
                           <input matSliderStartThumb

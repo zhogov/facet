@@ -17,8 +17,8 @@ from api.auth import CurrentUser, get_optional_user
 from api.config import VIEWER_CONFIG
 from api.database import get_async_db
 from api.db_helpers import (
-    get_existing_columns, get_visibility_clause, get_photos_from_clause,
-    get_preference_columns, PHOTO_BASE_COLS, PHOTO_OPTIONAL_COLS,
+    get_visibility_clause, get_photos_from_clause,
+    build_photo_select_columns,
     split_photo_tags, attach_person_data_async, format_date, sanitize_float_values,
 )
 from db.connection import HAS_SQLITE_VEC
@@ -340,19 +340,10 @@ async def api_search(
         async with get_async_db() as conn:
             user_id = user.user_id if user else None
             vis_sql, vis_params = get_visibility_clause(user_id)
-            # get_existing_columns() reads the lifespan-warmed cache, never
-            # touches conn after the first hit — safe with aiosqlite.
-            existing_cols = get_existing_columns(conn=None)
             from_clause, from_params = get_photos_from_clause(user_id)
-            pref_cols = get_preference_columns(user_id)
-            pref_col_names = {'star_rating', 'is_favorite', 'is_rejected'}
-            select_cols = list(PHOTO_BASE_COLS)
-            for c in PHOTO_OPTIONAL_COLS:
-                if c in existing_cols:
-                    if c in pref_col_names:
-                        select_cols.append(f"{pref_cols[c]} as {c}")
-                    else:
-                        select_cols.append(c)
+            # build_photo_select_columns(conn=None) reads the lifespan-warmed
+            # cache, safe to call from this aiosqlite context.
+            select_cols = build_photo_select_columns(conn=None, user_id=user_id)
 
             embedding_scores: dict[str, float] = {}
             fts_scores: dict[str, float] = {}

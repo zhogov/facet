@@ -396,7 +396,7 @@ Configuration:
     # Import scorer (deferred to avoid loading heavy modules for --help)
     from processing.scorer import (
         Facet, process_bursts, process_single_photo,
-        _load_image_modules, backup_database,
+        _load_image_modules,
     )
 
     # Compute recommendations mode (lightweight - no GPU needed)
@@ -552,7 +552,6 @@ Configuration:
 
         # Step 0: schema migration FIRST so subsequent steps can read/write
         # any new columns added since the DB was last initialised.
-        from db.schema import init_database
         from db import DEFAULT_DB_PATH
         db_path = args.db or DEFAULT_DB_PATH
         logger.info("--- Schema migration (init_database) ---")

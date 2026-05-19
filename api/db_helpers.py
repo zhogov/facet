@@ -354,6 +354,11 @@ def reassign_faces_to_person(conn, person_id, face_ids):
     if not face_ids:
         return {"assigned_count": 0, "face_count": 0, "deleted_persons": []}
 
+    # Dedup face_ids so the existence check below isn't tripped up by duplicates
+    # collapsing in SQL's IN-set semantics (SELECT IN (5,5,6) returns one row for 5,
+    # producing a false-negative len-mismatch even though both IDs exist).
+    face_ids = list(dict.fromkeys(face_ids))
+
     placeholders = ",".join("?" * len(face_ids))
     existing = conn.execute(
         f"SELECT id, person_id FROM faces WHERE id IN ({placeholders})",
@@ -426,8 +431,8 @@ _UNASSIGNED_FOR_PATHS_TMPL = """
 def _apply_person_data(photos, person_rows, unassigned_rows):
     """Mutate ``photos`` in place from the two query result sets.
 
-    Shared by the sync and async variants so the post-query logic stays in
-    one place.
+    Extracted from ``attach_person_data_async`` so the post-query mapping
+    logic is pure (no DB access) and unit-testable.
     """
     path_to_persons: dict[str, list[dict]] = {}
     for row in person_rows:

@@ -101,7 +101,6 @@ async def lifespan(app: FastAPI):
 
         def _wal_checkpoint_loop():
             from api.database import get_db_connection
-            import sqlite3 as _sqlite3
             interval = max(60, wal_minutes * 60)
             while not wal_stop.wait(interval):
                 try:
@@ -111,7 +110,11 @@ async def lifespan(app: FastAPI):
                         conn.commit()
                     finally:
                         conn.close()
-                except _sqlite3.Error:
+                except Exception:
+                    # Broad except: the loop must survive any transient error
+                    # (sqlite lock contention, extension load issues, OSError
+                    # when the DB file is being moved, etc.). A narrow sqlite3.Error
+                    # let non-sqlite exceptions kill the thread silently.
                     logger.warning("WAL checkpoint failed", exc_info=True)
 
         # daemon=True so the thread doesn't block process exit if join() times out,
@@ -132,7 +135,6 @@ async def lifespan(app: FastAPI):
     # never blocks shutdown.
     if wal_minutes > 0:
         try:
-            import sqlite3 as _sqlite3_shutdown
             from api.database import get_db_connection
             conn = get_db_connection()
             try:
@@ -140,7 +142,7 @@ async def lifespan(app: FastAPI):
                 conn.commit()
             finally:
                 conn.close()
-        except _sqlite3_shutdown.Error:
+        except Exception:
             logger.warning("Final WAL checkpoint on shutdown failed", exc_info=True)
     # Shutdown: clean up plugin thread pool
     from plugins import get_plugin_manager

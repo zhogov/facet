@@ -428,7 +428,7 @@ function saveSectionStates(states: Record<string, boolean>): void {
             (change)="store.updateFilter('is_monochrome', $event.checked)"
           >{{ 'gallery.monochrome_only' | translate }}</mat-checkbox>
           <div class="hidden md:flex items-center gap-2 mt-2">
-            <label class="text-sm opacity-70 shrink-0">{{ 'gallery.layout_mode' | translate }}</label>
+            <span class="text-sm opacity-70 shrink-0">{{ 'gallery.layout_mode' | translate }}</span>
             <div class="flex gap-1 ml-auto">
               <button mat-icon-button class="!w-8 !h-8 !p-0 inline-flex items-center justify-center"
                 [class.!bg-[var(--mat-sys-primary-container)]]="store.galleryMode() === 'grid'"
@@ -446,7 +446,7 @@ function saveSectionStates(states: Record<string, boolean>): void {
           </div>
           @if (sliderConfig(); as sc) {
             <div class="hidden md:flex items-center gap-2 mt-2">
-              <label class="text-sm opacity-70 shrink-0">{{ 'gallery.thumbnail_size' | translate }}</label>
+              <span class="text-sm opacity-70 shrink-0">{{ 'gallery.thumbnail_size' | translate }}</span>
               <mat-slider [min]="sc.min_px" [max]="sc.max_px" [step]="sc.step_px" class="flex-1">
                 <input matSliderThumb [value]="store.cardWidth()" (valueChange)="store.setCardWidth($event)" [attr.aria-label]="'gallery.thumbnail_size' | translate" />
               </mat-slider>
@@ -539,7 +539,7 @@ function saveSectionStates(states: Record<string, boolean>): void {
           <div class="flex flex-col gap-1 pb-1">
             @for (def of group.filters; track def.id) {
               <div class="flex flex-col gap-0">
-                <label class="text-xs opacity-60 px-1">{{ def.labelKey | translate }}</label>
+                <span class="text-xs opacity-60 px-1">{{ def.labelKey | translate }}</span>
                 <div class="flex items-center gap-1">
                   <mat-slider [min]="def.sliderMin" [max]="def.sliderMax" [step]="def.step" class="flex-1">
                     <input matSliderStartThumb

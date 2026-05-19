@@ -1,6 +1,5 @@
 """Tests for the health and readiness check endpoints (api/routers/health.py)."""
 
-from contextlib import nullcontext
 from unittest import mock
 
 import pytest

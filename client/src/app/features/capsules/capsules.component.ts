@@ -69,7 +69,12 @@ interface CapsulesResponse {
       @for (capsule of capsules(); track capsule.id) {
         <div
           class="group flex flex-col rounded-xl overflow-hidden bg-[var(--mat-sys-surface-container)] hover:shadow-lg transition-shadow cursor-pointer text-left w-full"
+          role="button"
+          tabindex="0"
+          [attr.aria-label]="capsule.title"
           (click)="playCapsule(capsule)"
+          (keydown.enter)="playCapsule(capsule)"
+          (keydown.space)="playCapsule(capsule); $event.preventDefault()"
         >
           @if (capsule.cover_photo_path) {
             <div class="relative w-full aspect-[4/3] overflow-hidden">

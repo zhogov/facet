@@ -12,7 +12,6 @@ import numpy as np
 
 logger = logging.getLogger("facet.face_analyzer")
 
-from analyzers.image_cache import ImageCache
 from utils.image_transforms import crop_face_with_padding
 
 class FaceAnalyzer:

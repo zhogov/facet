@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import create_app
-from api.auth import CurrentUser
+from api.auth import CurrentUser, require_authenticated, require_edition
 
 
 def _cm(conn):
@@ -20,17 +20,12 @@ def _cm(conn):
 @pytest.fixture()
 def client():
     app = create_app()
-    with (
-        mock.patch(
-            "api.routers.persons.require_edition",
-            return_value=CurrentUser(edition_authenticated=True),
-        ),
-        mock.patch(
-            "api.routers.persons.require_authenticated",
-            return_value=CurrentUser(),
-        ),
-    ):
+    app.dependency_overrides[require_edition] = lambda: CurrentUser(edition_authenticated=True)
+    app.dependency_overrides[require_authenticated] = lambda: CurrentUser(edition_authenticated=True)
+    try:
         yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
 
 
 class TestMergePersons:

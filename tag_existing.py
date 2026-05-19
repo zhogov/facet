@@ -7,7 +7,6 @@ This is much faster than rescanning as it doesn't require GPU inference.
 import logging
 import sqlite3
 import argparse
-from pathlib import Path
 
 logger = logging.getLogger("facet.tag_existing")
 
@@ -111,7 +110,6 @@ def main():
     logger.info("  Max tags: %s", max_tags)
 
     # Load CLIP model and tagger
-    import torch
 
     clip_cfg = config.get_clip_config()
     clip_model_name = clip_cfg.get('model_name', 'ViT-L-14')

@@ -91,10 +91,21 @@ async def get_async_db():
         await conn.execute("PRAGMA temp_store = MEMORY")
         await conn.execute(f"PRAGMA mmap_size = {mmap_bytes}")
         await conn.execute("PRAGMA journal_size_limit = 67108864")
-        # sqlite-vec loads only on the sync path's connection-factory hook; the
-        # async surface skips it because vec0 virtual tables can be queried
-        # without the extension being loaded in the *current* connection
-        # (sqlite-vec is a per-connection extension and only writes need it).
+        # Load sqlite-vec on each aiosqlite connection so KNN queries against
+        # `photos_vec` work on the async path. sqlite-vec is per-connection —
+        # `vec0` and `vec_distance_cosine` are unavailable without this load.
+        # Skipping it would silently fall back to a full NumPy matmul on every
+        # search.
+        from db.connection import HAS_SQLITE_VEC
+        if HAS_SQLITE_VEC:
+            try:
+                import sqlite_vec
+                await conn.enable_load_extension(True)
+                await conn.load_extension(sqlite_vec.loadable_path())
+                await conn.enable_load_extension(False)
+            except Exception:
+                # Non-fatal: search will fall back to NumPy via _check_vec_available.
+                pass
         conn.row_factory = aiosqlite.Row
         yield conn
     finally:

@@ -16,9 +16,8 @@ from api.config import VIEWER_CONFIG, _FULL_CONFIG
 from api.database import get_async_db, get_db
 from api.models.gallery import GalleryParams
 from api.db_helpers import (
-    get_existing_columns, get_cached_count, get_cached_count_async, _add_tag_filter,
+    get_existing_columns, get_cached_count_async, _add_tag_filter,
     get_art_tags_from_config, build_hide_clauses,
-    PHOTO_BASE_COLS, PHOTO_OPTIONAL_COLS,
     split_photo_tags, attach_person_data_async, sanitize_float_values,
     get_visibility_clause, get_photos_from_clause, get_preference_columns,
     build_photo_select_columns,
@@ -430,16 +429,8 @@ async def api_photos(
             else:
                 hidden_summary = {'total': 0, 'blinks': 0, 'bursts': 0, 'duplicates': 0}
 
-            existing_cols = get_existing_columns(conn=None)  # cache hit, no PRAGMA
-            pref_cols = get_preference_columns(user_id)
-            pref_col_names = {'star_rating', 'is_favorite', 'is_rejected'}
-            select_cols = list(PHOTO_BASE_COLS)
-            for c in PHOTO_OPTIONAL_COLS:
-                if c in existing_cols:
-                    if c in pref_col_names:
-                        select_cols.append(f"{pref_cols[c]} as {c}")
-                    else:
-                        select_cols.append(c)
+            # cache hit, no PRAGMA — same select-cols logic as other endpoints
+            select_cols = build_photo_select_columns(conn=None, user_id=user_id)
 
             needs_top_picks_score = (
                 params.get('top_picks_filter') == '1' or
@@ -486,16 +477,7 @@ async def _enrich_similar_with_full_rows_async(page_results, conn, user_id):
         return page_results
     sim_map = {r['path']: r['similarity'] for r in page_results}
     paths = [r['path'] for r in page_results]
-    existing_cols = get_existing_columns(conn=None)
-    pref_cols = get_preference_columns(user_id)
-    pref_col_names = {'star_rating', 'is_favorite', 'is_rejected'}
-    select_cols = list(PHOTO_BASE_COLS)
-    for c in PHOTO_OPTIONAL_COLS:
-        if c in existing_cols:
-            if c in pref_col_names:
-                select_cols.append(f"{pref_cols[c]} as {c}")
-            else:
-                select_cols.append(c)
+    select_cols = build_photo_select_columns(conn=None, user_id=user_id)
     placeholders = ','.join(['?'] * len(paths))
     vis_sql, vis_params = get_visibility_clause(user_id)
     cur = await conn.execute(

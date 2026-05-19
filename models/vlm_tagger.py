@@ -8,7 +8,7 @@ confidence scores.
 """
 
 import logging
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Dict, Any
 import math
 import PIL.Image
 

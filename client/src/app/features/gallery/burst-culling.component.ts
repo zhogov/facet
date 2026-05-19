@@ -143,7 +143,12 @@ interface CullingGroupsResponse {
                        [class.border-green-500]="photo.path | isKept:selectionsMap():group.group_id"
                        [class.border-red-500]="!(photo.path | isKept:selectionsMap():group.group_id) && (photo.path | isDecided:selectionsMap():group.group_id)"
                        [class.border-transparent]="!(photo.path | isDecided:selectionsMap():group.group_id)"
+                       role="button"
+                       tabindex="0"
+                       [attr.aria-label]="photo.filename"
                        (click)="openLightbox(group, pIdx)"
+                       (keydown.enter)="openLightbox(group, pIdx)"
+                       (keydown.space)="openLightbox(group, pIdx); $event.preventDefault()"
                        (dblclick)="selectExclusive(photo.path, group); $event.stopPropagation()">
                     <img [src]="photo.path | thumbnailUrl:640"
                          class="h-72 md:h-96 w-auto object-contain" [alt]="photo.filename" loading="lazy" />
@@ -234,7 +239,12 @@ interface CullingGroupsResponse {
 
     <!-- Lightbox overlay -->
     @if (lightboxGroup(); as lbGroup) {
-      <div class="fixed inset-0 z-[100] bg-black/95 flex flex-col" (click)="closeLightbox()">
+      <div class="fixed inset-0 z-[100] bg-black/95 flex flex-col"
+           role="dialog"
+           aria-modal="true"
+           tabindex="-1"
+           (click)="closeLightbox()"
+           (keydown.escape)="closeLightbox()">
         <!-- Header -->
         <div class="flex items-center justify-between px-4 py-2 text-white text-sm">
           <div class="opacity-70">
@@ -255,13 +265,19 @@ interface CullingGroupsResponse {
         </div>
         <!-- Image -->
         @if (lbGroup.photos[lightboxIndex()]; as lbPhoto) {
-          <div class="flex-1 flex items-center justify-center overflow-hidden" (click)="$event.stopPropagation()">
+          <div class="flex-1 flex items-center justify-center overflow-hidden"
+               role="presentation"
+               (click)="$event.stopPropagation()"
+               (keydown)="$event.stopPropagation()">
             <img [src]="lbPhoto.path | thumbnailUrl:1920"
                  class="max-h-full max-w-full object-contain"
                  [alt]="lbPhoto.filename" />
           </div>
           <!-- Footer status -->
-          <div class="px-4 py-3 text-center" (click)="$event.stopPropagation()">
+          <div class="px-4 py-3 text-center"
+               role="presentation"
+               (click)="$event.stopPropagation()"
+               (keydown)="$event.stopPropagation()">
             @if (lbPhoto.path | isKept:selectionsMap():lbGroup.group_id) {
               <span class="inline-flex items-center gap-1 text-green-400 text-sm">
                 <mat-icon class="!text-base !w-4 !h-4 !leading-4">check</mat-icon>

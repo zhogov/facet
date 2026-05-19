@@ -7,7 +7,7 @@ making it a good balance between CLIP and VLM taggers.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 import PIL.Image
 
 logger = logging.getLogger("facet.ram_tagger")

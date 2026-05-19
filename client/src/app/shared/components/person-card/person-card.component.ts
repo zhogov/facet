@@ -65,7 +65,11 @@ export interface Person {
           <!-- Name & count -->
           <div class="min-w-0 flex-1">
             @if (isEditing()) {
-              <div class="flex items-center gap-1" (click)="$event.stopPropagation()">
+              <div class="flex items-center gap-1"
+                   role="presentation"
+                   tabindex="-1"
+                   (click)="$event.stopPropagation()"
+                   (keydown)="$event.stopPropagation()">
                 <input
                   #nameInput
                   class="flex-1 bg-transparent border-b border-current outline-none text-sm py-0.5"
@@ -92,7 +96,11 @@ export interface Person {
           </div>
           <!-- Actions (inline, right side) -->
           @if (canEdit() && !isEditing()) {
-            <div class="flex items-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" (click)="$event.stopPropagation()">
+            <div class="flex items-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                 role="presentation"
+                 tabindex="-1"
+                 (click)="$event.stopPropagation()"
+                 (keydown)="$event.stopPropagation()">
               <button mat-icon-button [matTooltip]="'persons.rename' | translate" (click)="editStart.emit(person().id)">
                 <mat-icon class="opacity-60">edit</mat-icon>
               </button>

@@ -173,7 +173,7 @@ export class NewPersonDialogComponent {
                   [isEditing]="true"
                   [canEdit]="true"
                   (editSave)="onNeedsNamingSave($event)"
-                  (editCancel)="onNeedsNamingCancel(p.id)"
+                  (editCancel)="onNeedsNamingCancel()"
                   (viewPhotos)="onViewPhotos($event)"
                 />
               }
@@ -304,7 +304,7 @@ export class ManagePersonsComponent implements OnInit {
     }
   }
 
-  onNeedsNamingCancel(_id: number): void {
+  onNeedsNamingCancel(): void {
     // Stay in edit mode in this section; cancel just blurs the input (no-op here).
   }
 

@@ -26,7 +26,6 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 import torch

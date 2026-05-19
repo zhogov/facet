@@ -41,8 +41,12 @@ interface Slide {
       #slideshowContainer
       class="fixed inset-0 z-[9999] bg-black overflow-hidden select-none"
       [class.cursor-none]="!controlsVisible()"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
       (mousemove)="showControls()"
       (click)="showControls()"
+      (keydown.enter)="showControls()"
     >
       <div
         [class]="autoRotate() ? 'flex flex-col absolute top-1/2 left-1/2' : 'flex flex-col w-full h-full'"
@@ -56,7 +60,9 @@ interface Slide {
         class="absolute top-0 left-0 right-0 flex items-center justify-between py-2 px-3 z-30 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-300"
         [class.opacity-0]="!controlsVisible()"
         [class.pointer-events-none]="!controlsVisible()"
+        role="presentation"
         (click)="$event.stopPropagation()"
+        (keydown)="$event.stopPropagation()"
         (mousemove)="$event.stopPropagation()"
       >
         @if (photoCounter(); as c) {
@@ -152,7 +158,9 @@ interface Slide {
         class="absolute bottom-0 left-0 right-0 z-30 bg-black/70 px-4 py-3 transition-opacity duration-300"
         [class.opacity-0]="!controlsVisible()"
         [class.pointer-events-none]="!controlsVisible()"
+        role="presentation"
         (click)="$event.stopPropagation()"
+        (keydown)="$event.stopPropagation()"
         (mousemove)="$event.stopPropagation()"
       >
         <!-- Progress bar -->

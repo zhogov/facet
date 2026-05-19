@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from db import init_database, get_connection
-from db.vec import sync_vec_row, sync_vec_batch
+from db.vec import sync_vec_batch
 
 # Optional tqdm for progress bars
 try:
@@ -38,7 +38,7 @@ warnings.filterwarnings('ignore')
 logging.getLogger('exifread').setLevel(logging.ERROR)
 
 # Import config module (lightweight, no cv2/torch dependency)
-from config import ScoringConfig, PercentileNormalizer
+from config import ScoringConfig
 
 logger = logging.getLogger("facet.scorer")
 
@@ -118,7 +118,7 @@ def _load_model_manager_modules():
     global ModelManager, VLMCompositionAnalyzer
     if ModelManager is None:
         from models.model_manager import ModelManager as _ModelManager
-        from models.vlm_composition import VLMCompositionAnalyzer as _VLMCompositionAnalyzer, create_composition_analyzer as _create_composition_analyzer
+        from models.vlm_composition import VLMCompositionAnalyzer as _VLMCompositionAnalyzer
         ModelManager = _ModelManager
         VLMCompositionAnalyzer = _VLMCompositionAnalyzer
 
@@ -1530,7 +1530,7 @@ class Facet:
 
         Updates comp_score, composition_pattern, and power_point_score columns.
         """
-        from models.samp_net import SAMPNetScorer, COMPOSITION_PATTERNS
+        from models.samp_net import SAMPNetScorer
 
         logger.info("Rescanning composition with SAMP-Net from stored thumbnails...")
 
@@ -1639,7 +1639,7 @@ class Facet:
         Skips face_quality_iqa for photos without faces.
         """
         import time
-        from models.pyiqa_scorer import PyIQAScorer, PYIQA_MODELS
+        from models.pyiqa_scorer import PYIQA_MODELS
         from models.model_manager import ModelManager
 
         columns = [col for _, col in self._IQA_MODELS]

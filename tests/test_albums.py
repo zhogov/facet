@@ -7,13 +7,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import create_app
-from api.auth import CurrentUser
+from api.auth import CurrentUser, require_authenticated, require_edition
 
 
 @pytest.fixture()
 def client():
     app = create_app()
-    return TestClient(app)
+    app.dependency_overrides[require_edition] = lambda: CurrentUser(edition_authenticated=True)
+    app.dependency_overrides[require_authenticated] = lambda: CurrentUser(edition_authenticated=True)
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
 
 
 def _make_album_row(

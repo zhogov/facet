@@ -91,6 +91,15 @@ async def api_timeline(
     if granularity not in ('day', 'week', 'month'):
         granularity = 'day'
 
+    # Cap total photo materialisation to prevent unbounded responses (a request
+    # with limit=500 & photos_per_group=100 would otherwise return 50k photos
+    # with full PHOTO_*_COLS and trigger an N+1 person attach pass).
+    _TIMELINE_PHOTO_BUDGET = 2000
+    if photos_per_group:
+        max_limit = max(1, _TIMELINE_PHOTO_BUDGET // photos_per_group)
+        if limit > max_limit:
+            limit = max_limit
+
     # Build date expression based on granularity
     if granularity == 'week':
         # ISO week: group by year + week number (Monday-based)
