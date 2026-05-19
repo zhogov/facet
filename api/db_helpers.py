@@ -6,6 +6,7 @@ Database helper functions for the FastAPI API server.
 import hashlib
 import logging
 import math
+import sqlite3
 import struct
 import time
 from config import ScoringConfig
@@ -126,11 +127,23 @@ def get_existing_columns(conn=None):
 
 
 def is_photo_tags_available(conn=None):
-    """Check if the photo_tags lookup table exists and has data."""
+    """Check if the photo_tags lookup table exists and has data.
+
+    Cache-warm path (after first call) returns instantly without touching
+    ``conn`` — safe to call from an async context with an aiosqlite
+    Connection as long as the lifespan startup warmed the cache.
+    """
     global _photo_tags_available
     with _photo_tags_lock:
         if _photo_tags_available is not None:
             return _photo_tags_available
+
+    # Cold path: only fire if a sync sqlite3.Connection was provided, or open
+    # a fresh one. Passing an aiosqlite Connection here would be a programmer
+    # error — refuse rather than emit a coroutine-never-awaited warning.
+    if conn is not None and not isinstance(conn, sqlite3.Connection):
+        # Fall through to open our own sync connection.
+        conn = None
 
     close_conn = False
     if conn is None:
@@ -222,20 +235,19 @@ def get_art_tags_from_config():
     return _art_tags_cache
 
 
-def get_cached_count(conn, where_str, sql_params, from_clause="photos"):
-    """Cache COUNT results to avoid repeated full-table scans."""
-    cache_key = hashlib.sha256(f"{from_clause}:{where_str}:{tuple(sql_params)}".encode()).hexdigest()
-
+def _count_cache_lookup(cache_key):
+    """Return cached count if fresh, else None."""
     now = time.time()
     with _count_cache_lock:
         if cache_key in _count_cache:
             count, ts = _count_cache[cache_key]
             if now - ts < COUNT_CACHE_TTL:
                 return count
+    return None
 
-    row = conn.execute(f"SELECT COUNT(*) FROM {from_clause}{where_str}", sql_params).fetchone()
-    count = row[0] if row else 0
 
+def _count_cache_store(cache_key, count):
+    now = time.time()
     with _count_cache_lock:
         _count_cache[cache_key] = (count, now)
         if len(_count_cache) > 100:
@@ -243,6 +255,32 @@ def get_cached_count(conn, where_str, sql_params, from_clause="photos"):
             for k in expired:
                 del _count_cache[k]
 
+
+def get_cached_count(conn, where_str, sql_params, from_clause="photos"):
+    """Cache COUNT results to avoid repeated full-table scans."""
+    cache_key = hashlib.sha256(f"{from_clause}:{where_str}:{tuple(sql_params)}".encode()).hexdigest()
+    cached = _count_cache_lookup(cache_key)
+    if cached is not None:
+        return cached
+
+    row = conn.execute(f"SELECT COUNT(*) FROM {from_clause}{where_str}", sql_params).fetchone()
+    count = row[0] if row else 0
+    _count_cache_store(cache_key, count)
+    return count
+
+
+async def get_cached_count_async(conn, where_str, sql_params, from_clause="photos"):
+    """Async variant of get_cached_count for aiosqlite paths."""
+    cache_key = hashlib.sha256(f"{from_clause}:{where_str}:{tuple(sql_params)}".encode()).hexdigest()
+    cached = _count_cache_lookup(cache_key)
+    if cached is not None:
+        return cached
+
+    cursor = await conn.execute(f"SELECT COUNT(*) FROM {from_clause}{where_str}", sql_params)
+    row = await cursor.fetchone()
+    await cursor.close()
+    count = row[0] if row else 0
+    _count_cache_store(cache_key, count)
     return count
 
 

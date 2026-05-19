@@ -96,6 +96,27 @@ def _conn_factory(db_path):
     return factory
 
 
+def _async_conn_factory(db_path):
+    """Yield a real aiosqlite Connection bound to the test DB.
+
+    The /api/photos handler is async (R7 closure); tests that previously
+    only patched get_db must also patch get_async_db with this factory so
+    the endpoint reaches the temp DB instead of the production one.
+    """
+    from contextlib import asynccontextmanager
+    import aiosqlite
+
+    @asynccontextmanager
+    async def factory():
+        c = await aiosqlite.connect(db_path)
+        c.row_factory = aiosqlite.Row
+        try:
+            yield c
+        finally:
+            await c.close()
+    return factory
+
+
 def _create_app_no_auth():
     app = create_app()
     app.dependency_overrides[get_optional_user] = lambda: None
@@ -115,6 +136,21 @@ _VIEWER_CONFIG = {
     "features": {},
 }
 
+# Columns declared in _PHOTOS_SCHEMA above — used to pre-seed
+# _existing_columns_cache so the async /api/photos handler builds its
+# SELECT list against the test schema, not the production DB schema.
+_TEST_PHOTOS_COLUMNS = {
+    "path", "filename", "date_taken", "camera_model", "lens_model", "iso",
+    "f_stop", "shutter_speed", "focal_length", "focal_length_35mm",
+    "aesthetic", "face_count", "face_quality", "eye_sharpness",
+    "face_sharpness", "face_ratio", "tech_sharpness", "color_score",
+    "exposure_score", "comp_score", "isolation_bonus", "is_blink",
+    "phash", "is_burst_lead", "aggregate", "category", "image_width",
+    "image_height", "tags", "composition_pattern", "person_id",
+    "is_monochrome", "dynamic_range_stops", "noise_sigma", "contrast_score",
+    "star_rating", "is_favorite", "is_rejected",
+}
+
 
 # ---------------------------------------------------------------------------
 # Gallery Photos
@@ -130,8 +166,9 @@ class TestGalleryPhotos:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photos?page=1&per_page=2")
@@ -151,8 +188,9 @@ class TestGalleryPhotos:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photos?page=1&sort=aesthetic&sort_direction=DESC")
@@ -167,8 +205,9 @@ class TestGalleryPhotos:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photos?page=1&sort=NONEXISTENT")
@@ -184,8 +223,9 @@ class TestGalleryPhotos:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photos?page=1&camera=Canon+R6")
@@ -203,8 +243,9 @@ class TestGalleryPhotos:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photos?page=1&date_from=2024-06-01&date_to=2024-06-30")
@@ -222,8 +263,9 @@ class TestGalleryPhotos:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photos?page=1&category=portrait")
@@ -238,8 +280,9 @@ class TestGalleryPhotos:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photos?page=1&per_page=9999")
@@ -278,8 +321,9 @@ class TestGallerySinglePhoto:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app, raise_server_exceptions=False).get(
@@ -293,8 +337,9 @@ class TestGallerySinglePhoto:
         app = _create_app_no_auth()
         with (
             mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
             mock.patch.dict("api.config._count_cache", {}, clear=True),
         ):
             resp = TestClient(app).get("/api/photo?path=/found.jpg")

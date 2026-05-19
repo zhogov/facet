@@ -12,13 +12,13 @@ from pydantic import ValidationError
 
 from api.auth import CurrentUser, get_optional_user
 from api.config import VIEWER_CONFIG, _FULL_CONFIG
-from api.database import get_db
+from api.database import get_async_db, get_db
 from api.models.gallery import GalleryParams
 from api.db_helpers import (
-    get_existing_columns, get_cached_count, _add_tag_filter,
+    get_existing_columns, get_cached_count, get_cached_count_async, _add_tag_filter,
     get_art_tags_from_config, build_hide_clauses,
     PHOTO_BASE_COLS, PHOTO_OPTIONAL_COLS,
-    split_photo_tags, attach_person_data, sanitize_float_values,
+    split_photo_tags, attach_person_data, attach_person_data_async, sanitize_float_values,
     get_visibility_clause, get_photos_from_clause, get_preference_columns,
     build_photo_select_columns,
     format_date, to_exif_date, paginate,
@@ -331,11 +331,18 @@ def api_type_counts(
 
 
 @router.get("/api/photos")
-def api_photos(
+async def api_photos(
     request: Request,
     user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
-    """Gallery photo listing with filtering, sorting, and pagination."""
+    """Gallery photo listing with filtering, sorting, and pagination (async).
+
+    Migrated to aiosqlite. _build_gallery_where() still accepts a Connection
+    because its internal helpers (is_photo_tags_available, get_existing_columns)
+    are cache-warmed at lifespan startup and never touch conn after the first
+    hit. get_cached_count_async / attach_person_data_async cover the awaited
+    DB paths.
+    """
     qp = dict(request.query_params)
     defaults_cfg = VIEWER_CONFIG['defaults']
     default_per_page = VIEWER_CONFIG['pagination']['default_per_page']
@@ -372,15 +379,15 @@ def api_photos(
     sort_dir = 'ASC' if params['dir'] == 'ASC' else 'DESC'
     order_by_clause = f"{sort_col} {sort_dir}, path ASC"
 
-    with get_db() as conn:
-        try:
+    try:
+        async with get_async_db() as conn:
             user_id = user.user_id if user else None
             from_clause, from_params = get_photos_from_clause(user_id)
             where_clauses, sql_params = _build_gallery_where(params, conn, user_id=user_id)
             all_params = from_params + sql_params
             where_str = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-            total_count = get_cached_count(conn, where_str, all_params, from_clause=from_clause)
+            total_count = await get_cached_count_async(conn, where_str, all_params, from_clause=from_clause)
             total_pages, offset = paginate(total_count, page, per_page)
 
             any_hide_active = any(
@@ -398,7 +405,7 @@ def api_photos(
                 where_str_no_hide = (
                     f" WHERE {' AND '.join(where_no_hide)}" if where_no_hide else ""
                 )
-                row = conn.execute(
+                cur = await conn.execute(
                     "SELECT "
                     "COUNT(*) AS unhidden, "
                     "SUM(CASE WHEN is_blink = 1 THEN 1 ELSE 0 END) AS blinks, "
@@ -407,7 +414,9 @@ def api_photos(
                     "THEN 1 ELSE 0 END) AS duplicates "
                     f"FROM {from_clause}{where_str_no_hide}",
                     all_params_no_hide,
-                ).fetchone()
+                )
+                row = await cur.fetchone()
+                await cur.close()
                 unhidden_total = row['unhidden'] if row else total_count
                 hidden_summary = {
                     'total': max(0, unhidden_total - total_count),
@@ -418,7 +427,7 @@ def api_photos(
             else:
                 hidden_summary = {'total': 0, 'blinks': 0, 'bursts': 0, 'duplicates': 0}
 
-            existing_cols = get_existing_columns(conn)
+            existing_cols = get_existing_columns(conn=None)  # cache hit, no PRAGMA
             pref_cols = get_preference_columns(user_id)
             pref_col_names = {'star_rating', 'is_favorite', 'is_rejected'}
             select_cols = list(PHOTO_BASE_COLS)
@@ -438,7 +447,9 @@ def api_photos(
                 select_cols.append(f"({top_picks_expr}) as top_picks_score")
 
             query = f"SELECT {', '.join(select_cols)} FROM {from_clause}{where_str} ORDER BY {order_by_clause} LIMIT ? OFFSET ?"
-            rows = conn.execute(query, all_params + [per_page, offset]).fetchall()
+            cur = await conn.execute(query, all_params + [per_page, offset])
+            rows = await cur.fetchall()
+            await cur.close()
 
             tags_limit = VIEWER_CONFIG['display']['tags_per_photo']
             photos = split_photo_tags(rows, tags_limit)
@@ -446,11 +457,11 @@ def api_photos(
             for photo in photos:
                 photo['date_formatted'] = format_date(photo.get('date_taken'))
 
-            attach_person_data(photos, conn)
+            await attach_person_data_async(photos, conn)
 
-        except sqlite3.Error:
-            logger.exception("Failed to fetch gallery photos")
-            raise HTTPException(status_code=500, detail='Internal server error')
+    except sqlite3.Error:
+        logger.exception("Failed to fetch gallery photos")
+        raise HTTPException(status_code=500, detail='Internal server error')
 
     sanitize_float_values(photos)
 
