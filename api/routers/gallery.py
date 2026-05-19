@@ -3,6 +3,7 @@ Gallery router — photo listing, type counts, similar photos.
 
 """
 
+import asyncio
 import logging
 import math
 import sqlite3
@@ -18,7 +19,7 @@ from api.db_helpers import (
     get_existing_columns, get_cached_count, get_cached_count_async, _add_tag_filter,
     get_art_tags_from_config, build_hide_clauses,
     PHOTO_BASE_COLS, PHOTO_OPTIONAL_COLS,
-    split_photo_tags, attach_person_data, attach_person_data_async, sanitize_float_values,
+    split_photo_tags, attach_person_data_async, sanitize_float_values,
     get_visibility_clause, get_photos_from_clause, get_preference_columns,
     build_photo_select_columns,
     format_date, to_exif_date, paginate,
@@ -281,37 +282,39 @@ def _build_gallery_where(params, conn=None, user_id=None):
 
 
 @router.get("/api/photo")
-def api_photo(
+async def api_photo(
     path: str = Query(...),
     user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
-    """Get a single photo by path (same shape as gallery items)."""
-    with get_db() as conn:
-        try:
+    """Get a single photo by path (same shape as gallery items). Async."""
+    try:
+        async with get_async_db() as conn:
             user_id = user.user_id if user else None
             from_clause, from_params = get_photos_from_clause(user_id)
             vis_sql, vis_params = get_visibility_clause(user_id)
 
-            select_cols = build_photo_select_columns(conn, user_id)
+            select_cols = build_photo_select_columns(conn=None, user_id=user_id)
 
             query = f"SELECT {', '.join(select_cols)} FROM {from_clause} WHERE photos.path = ? AND {vis_sql}"
-            row = conn.execute(query, from_params + [path] + vis_params).fetchone()
+            cur = await conn.execute(query, from_params + [path] + vis_params)
+            row = await cur.fetchone()
+            await cur.close()
             if not row:
                 raise HTTPException(status_code=404, detail="Photo not found")
 
             photos = split_photo_tags([row], VIEWER_CONFIG['display']['tags_per_photo'])
             photo = photos[0]
             photo['date_formatted'] = format_date(photo.get('date_taken'))
-            attach_person_data([photo], conn)
+            await attach_person_data_async([photo], conn)
 
             sanitize_float_values([photo])
 
             return photo
-        except HTTPException:
-            raise
-        except sqlite3.Error:
-            logger.exception("Failed to fetch photo details")
-            raise HTTPException(status_code=500, detail='Internal server error')
+    except HTTPException:
+        raise
+    except sqlite3.Error:
+        logger.exception("Failed to fetch photo details")
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 @router.get("/api/type_counts")
@@ -477,13 +480,13 @@ async def api_photos(
     }
 
 
-def _enrich_similar_with_full_rows(page_results, conn, user_id):
-    """Replace basic similar-photo dicts with full photo rows, preserving similarity order."""
+async def _enrich_similar_with_full_rows_async(page_results, conn, user_id):
+    """Async variant: replace basic similar-photo dicts with full photo rows, preserving similarity order."""
     if not page_results:
         return page_results
     sim_map = {r['path']: r['similarity'] for r in page_results}
     paths = [r['path'] for r in page_results]
-    existing_cols = get_existing_columns(conn)
+    existing_cols = get_existing_columns(conn=None)
     pref_cols = get_preference_columns(user_id)
     pref_col_names = {'star_rating', 'is_favorite', 'is_rejected'}
     select_cols = list(PHOTO_BASE_COLS)
@@ -495,12 +498,14 @@ def _enrich_similar_with_full_rows(page_results, conn, user_id):
                 select_cols.append(c)
     placeholders = ','.join(['?'] * len(paths))
     vis_sql, vis_params = get_visibility_clause(user_id)
-    rows = conn.execute(
+    cur = await conn.execute(
         f"SELECT {', '.join(select_cols)} FROM photos WHERE path IN ({placeholders}) AND {vis_sql}",
         paths + vis_params,
-    ).fetchall()
+    )
+    rows = await cur.fetchall()
+    await cur.close()
     photos = split_photo_tags(rows, VIEWER_CONFIG['display']['tags_per_photo'])
-    attach_person_data(photos, conn)
+    await attach_person_data_async(photos, conn)
     sanitize_float_values(photos)
     path_to_photo = {p['path']: p for p in photos}
     ordered = []
@@ -754,7 +759,7 @@ _MODE_DEFAULT_MIN_SIM = {
 
 
 @router.get("/api/similar_photos/{photo_path:path}")
-def api_similar_photos(
+async def api_similar_photos(
     photo_path: str,
     mode: str = Query("visual"),
     limit: int = Query(20),
@@ -763,12 +768,16 @@ def api_similar_photos(
     full: int = Query(0),
     user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
-    """Find similar photos using different similarity modes.
+    """Find similar photos using different similarity modes (async).
 
     Modes:
       - visual: pHash hamming distance (70%) + CLIP cosine (30%)
       - color: histogram intersection + saturation/luminance distance
       - person: same person_id or face embedding cosine similarity
+
+    The heavy numpy + DB scan inside _find_similar_* runs in a worker thread via
+    asyncio.to_thread, keeping the event loop free.  Source loading and result
+    enrichment run on the async connection.
     """
     if not VIEWER_CONFIG.get('features', {}).get('show_similar_button', True):
         raise HTTPException(status_code=503, detail='Similar photos feature is disabled')
@@ -777,40 +786,41 @@ def api_similar_photos(
         mode = 'visual'
 
     effective_min_sim = min_similarity if min_similarity is not None else _MODE_DEFAULT_MIN_SIM[mode]
+    user_id = user.user_id if user else None
+    vis_sql, vis_params = get_visibility_clause(user_id)
 
-    with get_db() as conn:
-        try:
-            user_id = user.user_id if user else None
-            vis_sql, vis_params = get_visibility_clause(user_id)
-
-            # Load source photo with all columns needed across modes
-            source = conn.execute(f"""
+    try:
+        async with get_async_db() as conn:
+            cur = await conn.execute(f"""
                 SELECT path, phash, clip_embedding, histogram_data, mean_saturation,
                        mean_luminance, is_monochrome,
                        aggregate, aesthetic, date_taken
                 FROM photos WHERE path = ? AND {vis_sql}
-            """, [photo_path] + vis_params).fetchone()
+            """, [photo_path] + vis_params)
+            source_row = await cur.fetchone()
+            await cur.close()
 
-            if not source:
+            if not source_row:
                 raise HTTPException(status_code=404, detail='Photo not found')
+            source = dict(source_row)
 
-            source = dict(source)
-            message = None
+            def _run_similarity():
+                with get_db() as sync_conn:
+                    if mode == 'visual':
+                        return _find_similar_visual(sync_conn, source, photo_path, effective_min_sim, vis_sql, vis_params)
+                    if mode == 'color':
+                        return _find_similar_color(sync_conn, source, photo_path, effective_min_sim, vis_sql, vis_params)
+                    if mode == 'person':
+                        return _find_similar_person(sync_conn, source, photo_path, effective_min_sim, vis_sql, vis_params, user_id=user_id)
+                    return [], None
 
-            if mode == 'visual':
-                results, message = _find_similar_visual(conn, source, photo_path, effective_min_sim, vis_sql, vis_params)
-            elif mode == 'color':
-                results, message = _find_similar_color(conn, source, photo_path, effective_min_sim, vis_sql, vis_params)
-            elif mode == 'person':
-                results, message = _find_similar_person(conn, source, photo_path, effective_min_sim, vis_sql, vis_params, user_id=user_id)
-            else:
-                results, message = [], None
+            results, message = await asyncio.to_thread(_run_similarity)
 
             total_count = len(results)
             page_results = results[offset:offset + limit]
 
             if full:
-                page_results = _enrich_similar_with_full_rows(page_results, conn, user_id)
+                page_results = await _enrich_similar_with_full_rows_async(page_results, conn, user_id)
 
             response = {
                 'source': photo_path,
@@ -823,9 +833,11 @@ def api_similar_photos(
                 response['message'] = message
             return response
 
-        except sqlite3.Error:
-            logger.exception("Failed to find similar photos")
-            raise HTTPException(status_code=500, detail='Internal server error')
+    except HTTPException:
+        raise
+    except sqlite3.Error:
+        logger.exception("Failed to find similar photos")
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 @router.get("/api/config")

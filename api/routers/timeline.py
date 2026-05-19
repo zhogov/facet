@@ -13,7 +13,7 @@ from api.database import get_async_db
 from api.db_helpers import (
     build_hide_clauses, build_date_range_clauses,
     build_photo_select_columns, sanitize_float_values,
-    split_photo_tags, attach_person_data, attach_person_data_async,
+    split_photo_tags, attach_person_data_async,
     get_visibility_clause, get_photos_from_clause,
     format_date,
 )

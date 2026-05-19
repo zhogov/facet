@@ -100,6 +100,42 @@ def _conn_factory(db_path: str):
     return factory
 
 
+def _async_conn_factory(db_path: str):
+    """Return an async context manager factory yielding an aiosqlite conn to db_path."""
+    from contextlib import asynccontextmanager
+    import aiosqlite
+
+    @asynccontextmanager
+    async def factory():
+        conn = await aiosqlite.connect(db_path)
+        conn.row_factory = aiosqlite.Row
+        try:
+            yield conn
+        finally:
+            await conn.close()
+    return factory
+
+
+async def _get_cached_count_async_passthrough(conn, where_str, sql_params, from_clause="photos"):
+    """Test stub for get_cached_count_async: runs COUNT directly, no cache."""
+    cur = await conn.execute(f"SELECT COUNT(*) FROM {from_clause}{where_str}", sql_params)
+    row = await cur.fetchone()
+    await cur.close()
+    return row[0] if row else 0
+
+
+_TEST_PHOTOS_COLUMNS = {
+    "path", "filename", "date_taken", "camera_model", "lens_model", "iso",
+    "f_stop", "shutter_speed", "focal_length", "focal_length_35mm",
+    "aesthetic", "face_count", "face_quality", "eye_sharpness", "face_sharpness",
+    "face_ratio", "tech_sharpness", "color_score", "exposure_score", "comp_score",
+    "isolation_bonus", "is_blink", "phash", "is_burst_lead", "aggregate",
+    "category", "image_width", "image_height", "tags", "composition_pattern",
+    "person_id", "is_monochrome", "dynamic_range_stops", "noise_sigma",
+    "contrast_score",
+}
+
+
 def _create_app_no_auth():
     app = create_app()
     app.dependency_overrides[get_optional_user] = lambda: None
@@ -125,15 +161,25 @@ _VIEWER_CONFIG = {
 class TestGalleryConnScope:
     """Conn moved inside try — basic queries, date filtering, error handling."""
 
+    def _gallery_patches(self, db_path):
+        """Common patches for async /api/photos tests against a real test DB."""
+        return [
+            mock.patch("api.routers.gallery.get_async_db", _async_conn_factory(db_path)),
+            mock.patch("api.routers.gallery.get_cached_count_async",
+                       _get_cached_count_async_passthrough),
+            mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
+            mock.patch("api.db_helpers._photo_tags_available", False),
+        ]
+
     def test_returns_photos(self, tmp_path):
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [_photo("/a.jpg", "2024:03:11 10:00:00")])
         app = _create_app_no_auth()
-        with (
-            mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
-            mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
-        ):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for p in self._gallery_patches(db_path):
+                stack.enter_context(p)
             resp = TestClient(app).get("/api/photos?page=1")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
@@ -147,11 +193,10 @@ class TestGalleryConnScope:
             _photo("/new.jpg", "2024:06:15 12:00:00"),
         ])
         app = _create_app_no_auth()
-        with (
-            mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
-            mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
-        ):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for p in self._gallery_patches(db_path):
+                stack.enter_context(p)
             resp = TestClient(app).get("/api/photos?page=1&date_from=2024-01-01")
         photos = resp.json()["photos"]
         assert len(photos) == 1
@@ -165,11 +210,10 @@ class TestGalleryConnScope:
             _photo("/new.jpg", "2024:06:15 12:00:00"),
         ])
         app = _create_app_no_auth()
-        with (
-            mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
-            mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
-        ):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for p in self._gallery_patches(db_path):
+                stack.enter_context(p)
             resp = TestClient(app).get("/api/photos?page=1&date_to=2023-12-31")
         photos = resp.json()["photos"]
         assert len(photos) == 1
@@ -184,11 +228,10 @@ class TestGalleryConnScope:
             _photo("/dec.jpg", "2024:12:25 18:00:00"),
         ])
         app = _create_app_no_auth()
-        with (
-            mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
-            mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
-        ):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for p in self._gallery_patches(db_path):
+                stack.enter_context(p)
             resp = TestClient(app).get(
                 "/api/photos?page=1&date_from=2024-03-01&date_to=2024-03-31"
             )
@@ -203,11 +246,10 @@ class TestGalleryConnScope:
             _photo("/evening.jpg", "2024:03:31 23:30:00"),
         ])
         app = _create_app_no_auth()
-        with (
-            mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
-            mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
-        ):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for p in self._gallery_patches(db_path):
+                stack.enter_context(p)
             resp = TestClient(app).get(
                 "/api/photos?page=1&date_to=2024-03-31"
             )
@@ -218,11 +260,10 @@ class TestGalleryConnScope:
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [_photo("/a.jpg", "2024:06:15 12:00:00")])
         app = _create_app_no_auth()
-        with (
-            mock.patch("api.routers.gallery.get_db", _conn_factory(db_path)),
-            mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
-        ):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for p in self._gallery_patches(db_path):
+                stack.enter_context(p)
             resp = TestClient(app).get(
                 "/api/photos?page=1&date_from=2025-01-01&date_to=2025-12-31"
             )
@@ -230,28 +271,37 @@ class TestGalleryConnScope:
         assert resp.json()["photos"] == []
 
     def test_conn_closed_on_error(self, tmp_path):
-        """Connection is closed even when query raises inside the with block."""
-        from contextlib import contextmanager
+        """The async context manager cleans up even when query raises."""
+        from contextlib import asynccontextmanager
 
-        conn_mock = mock.MagicMock()
-        conn_mock.execute.side_effect = RuntimeError("simulated DB error")
+        close_called = {"n": 0}
 
-        @contextmanager
-        def _get_db_mock():
+        class _Conn:
+            async def execute(self, *a, **kw):
+                raise RuntimeError("simulated DB error")
+            async def close(self):
+                close_called["n"] += 1
+
+        @asynccontextmanager
+        async def _broken_async_db():
+            conn = _Conn()
             try:
-                yield conn_mock
+                yield conn
             finally:
-                conn_mock.close()
+                await conn.close()
 
         app = _create_app_no_auth()
         with (
-            mock.patch("api.routers.gallery.get_db", _get_db_mock),
+            mock.patch("api.routers.gallery.get_async_db", _broken_async_db),
+            mock.patch("api.routers.gallery.get_cached_count_async",
+                       _get_cached_count_async_passthrough),
             mock.patch("api.routers.gallery.VIEWER_CONFIG", _VIEWER_CONFIG),
-            mock.patch("api.db_helpers._existing_columns_cache", None),
+            mock.patch("api.db_helpers._existing_columns_cache", _TEST_PHOTOS_COLUMNS),
+            mock.patch("api.db_helpers._photo_tags_available", False),
         ):
             resp = TestClient(app, raise_server_exceptions=False).get("/api/photos?page=1")
         assert resp.status_code == 500
-        conn_mock.close.assert_called_once()
+        assert close_called["n"] == 1
 
 
 # ---------------------------------------------------------------------------

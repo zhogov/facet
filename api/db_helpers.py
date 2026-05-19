@@ -442,29 +442,6 @@ def _apply_person_data(photos, person_rows, unassigned_rows):
         photo['unassigned_faces'] = path_to_unassigned.get(photo['path'], 0)
 
 
-def attach_person_data(photos, conn):
-    """Batch-fetch person associations and unassigned face counts for photos."""
-    if not photos:
-        return
-    try:
-        photo_paths = [p['path'] for p in photos]
-        placeholders = ','.join(['?'] * len(photo_paths))
-        person_rows = conn.execute(
-            _PERSONS_FOR_PATHS_TMPL.format(placeholders=placeholders),
-            photo_paths,
-        ).fetchall()
-        unassigned_rows = conn.execute(
-            _UNASSIGNED_FOR_PATHS_TMPL.format(placeholders=placeholders),
-            photo_paths,
-        ).fetchall()
-        _apply_person_data(photos, person_rows, unassigned_rows)
-    except Exception:
-        logger.exception("Failed to attach person data")
-        for photo in photos:
-            photo['persons'] = []
-            photo['unassigned_faces'] = 0
-
-
 async def attach_person_data_async(photos, conn):
     """Async variant: same shape, awaits aiosqlite cursors."""
     if not photos:

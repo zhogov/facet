@@ -15,11 +15,11 @@ from pydantic import BaseModel, Field
 
 from api.auth import CurrentUser, get_optional_user, require_edition
 from api.config import VIEWER_CONFIG
-from api.database import get_db
+from api.database import get_async_db, get_db
 from api.db_helpers import (
     get_visibility_clause, get_photos_from_clause,
     build_photo_select_columns, sanitize_float_values,
-    split_photo_tags, attach_person_data, format_date, paginate,
+    split_photo_tags, attach_person_data_async, format_date, paginate,
 )
 from api.types import VALID_SORT_COLS, SORT_OPTIONS_GROUPED, normalize_params
 
@@ -75,6 +75,18 @@ def _check_album_access(conn, album_id, user_id):
     return album
 
 
+async def _check_album_access_async(conn, album_id, user_id):
+    """Async variant of _check_album_access for aiosqlite paths."""
+    cur = await conn.execute("SELECT * FROM albums WHERE id = ?", (album_id,))
+    album = await cur.fetchone()
+    await cur.close()
+    if not album:
+        raise HTTPException(status_code=404, detail="Album not found")
+    if album['user_id'] and album['user_id'] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return album
+
+
 def _album_to_dict(album):
     """Convert album row to API response dict."""
     result = {
@@ -94,15 +106,22 @@ def _album_to_dict(album):
     return result
 
 
-def _fetch_album_photos(conn, album_row, user_id, page, per_page, sort_col, sort_dir, filters=None):
-    """Fetch paginated photos for an album (smart or regular).
+async def _fetch_album_photos(conn, album_row, user_id, page, per_page, sort_col, sort_dir, filters=None):
+    """Fetch paginated photos for an album (smart or regular). Async.
+
+    ``conn`` must be an aiosqlite Connection. ``_build_gallery_where`` is
+    called with this Connection — its internal helpers (is_photo_tags_
+    available, get_existing_columns) are cache-warmed by lifespan startup,
+    so they don't try to call ``.execute()`` on the async connection.
 
     Returns a dict with keys: photos, total, page, per_page, total_pages, has_more.
-    ``filters`` is an optional dict of additional filter params (camera, lens, tag, date_from, etc.)
-    applied via ``_build_gallery_where`` for regular albums.
     """
-    # Smart album: use saved filters
+    # build_photo_select_columns reads the lifespan-warmed
+    # _existing_columns_cache and never touches conn — safe with aiosqlite.
+    select_cols = build_photo_select_columns(conn=None, user_id=user_id)
+
     if album_row['is_smart'] and album_row['smart_filter_json']:
+        # Smart album: use saved filters
         from api.routers.gallery import _build_gallery_where
         saved_filters = json.loads(album_row['smart_filter_json'])
         saved_filters = _normalize_smart_filters(saved_filters)
@@ -111,19 +130,21 @@ def _fetch_album_photos(conn, album_row, user_id, page, per_page, sort_col, sort
         all_params = from_params + sql_params
         where_str = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        row = conn.execute(
+        cur = await conn.execute(
             f"SELECT COUNT(*) FROM {from_clause}{where_str}", all_params
-        ).fetchone()
+        )
+        row = await cur.fetchone()
+        await cur.close()
         total = row[0] if row else 0
 
-        select_cols = build_photo_select_columns(conn, user_id)
-
         safe_sort = sort_col if sort_col in VALID_SORT_COLS else 'aggregate'
-        rows = conn.execute(
+        cur = await conn.execute(
             f"SELECT {', '.join(select_cols)} FROM {from_clause}{where_str} "
             f"ORDER BY {safe_sort} {sort_dir} LIMIT ? OFFSET ?",
             all_params + [per_page, (page - 1) * per_page]
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
+        await cur.close()
     else:
         # Regular album: join with album_photos
         from_clause, from_params = get_photos_from_clause(user_id)
@@ -134,7 +155,6 @@ def _fetch_album_photos(conn, album_row, user_id, page, per_page, sort_col, sort
         base_where.append(vis_sql)
         base_params.extend(vis_params)
 
-        # Apply additional filters via _build_gallery_where
         if filters:
             from api.routers.gallery import _build_gallery_where
             extra_clauses, extra_params = _build_gallery_where(filters, conn)
@@ -143,33 +163,35 @@ def _fetch_album_photos(conn, album_row, user_id, page, per_page, sort_col, sort
 
         where_str = " AND ".join(base_where)
 
-        row = conn.execute(
+        cur = await conn.execute(
             f"SELECT COUNT(*) FROM album_photos ap "
             f"JOIN {from_clause} ON photos.path = ap.photo_path "
             f"WHERE {where_str}",
             from_params + base_params
-        ).fetchone()
+        )
+        row = await cur.fetchone()
+        await cur.close()
         total = row[0] if row else 0
-
-        select_cols = build_photo_select_columns(conn, user_id)
 
         safe_sort = sort_col if sort_col in VALID_SORT_COLS else 'ap.position'
         if sort_col == 'position':
             safe_sort = 'ap.position'
 
-        rows = conn.execute(
+        cur = await conn.execute(
             f"SELECT {', '.join(select_cols)} FROM album_photos ap "
             f"JOIN {from_clause} ON photos.path = ap.photo_path "
             f"WHERE {where_str} "
             f"ORDER BY {safe_sort} {sort_dir} LIMIT ? OFFSET ?",
             from_params + base_params + [per_page, (page - 1) * per_page]
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
+        await cur.close()
 
     tags_limit = VIEWER_CONFIG['display']['tags_per_photo']
     photos = split_photo_tags(rows, tags_limit)
     for photo in photos:
         photo['date_formatted'] = format_date(photo.get('date_taken'))
-    attach_person_data(photos, conn)
+    await attach_person_data_async(photos, conn)
 
     sanitize_float_values(photos)
 
@@ -184,37 +206,44 @@ def _fetch_album_photos(conn, album_row, user_id, page, per_page, sort_col, sort
     }
 
 
-def _get_album_filter_options(conn, album_id):
-    """Return filter dropdown options scoped to a regular album's photos."""
+async def _get_album_filter_options(conn, album_id):
+    """Return filter dropdown options scoped to a regular album's photos. Async."""
     base = (
         "SELECT {col}, COUNT(*) as cnt FROM album_photos ap "
         "JOIN photos ON photos.path = ap.photo_path "
         "WHERE ap.album_id = ? AND {col} IS NOT NULL "
         "GROUP BY {col} ORDER BY cnt DESC"
     )
-    cameras = conn.execute(base.format(col='camera_model'), (album_id,)).fetchall()
-    lenses = conn.execute(base.format(col='lens_model'), (album_id,)).fetchall()
-    tags_rows = conn.execute(
+
+    async def _all(query, params=()):
+        cur = await conn.execute(query, params)
+        rows = await cur.fetchall()
+        await cur.close()
+        return rows
+
+    cameras = await _all(base.format(col='camera_model'), (album_id,))
+    lenses = await _all(base.format(col='lens_model'), (album_id,))
+    tags_rows = await _all(
         "SELECT pt.tag, COUNT(*) as cnt FROM album_photos ap "
         "JOIN photo_tags pt ON pt.photo_path = ap.photo_path "
         "WHERE ap.album_id = ? "
         "GROUP BY pt.tag ORDER BY cnt DESC",
         (album_id,),
-    ).fetchall()
-    patterns = conn.execute(
+    )
+    patterns = await _all(
         "SELECT composition_pattern, COUNT(*) as cnt FROM album_photos ap "
         "JOIN photos ON photos.path = ap.photo_path "
         "WHERE ap.album_id = ? AND composition_pattern IS NOT NULL AND composition_pattern != '' "
         "GROUP BY composition_pattern ORDER BY cnt DESC",
         (album_id,),
-    ).fetchall()
-    categories = conn.execute(
+    )
+    categories = await _all(
         "SELECT category, COUNT(*) as cnt FROM album_photos ap "
         "JOIN photos ON photos.path = ap.photo_path "
         "WHERE ap.album_id = ? AND category IS NOT NULL AND category != '' "
         "GROUP BY category ORDER BY cnt DESC",
         (album_id,),
-    ).fetchall()
+    )
     return {
         'cameras': [{'value': r[0], 'count': r[1]} for r in cameras],
         'lenses': [{'value': r[0], 'count': r[1]} for r in lenses],
@@ -514,15 +543,15 @@ def remove_photos_from_album(
 
 
 @router.get("/api/albums/{album_id}/photos")
-def get_album_photos(
+async def get_album_photos(
     request: Request,
     album_id: int,
     user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
-    """Get photos in an album with pagination and sorting."""
-    with get_db() as conn:
+    """Get photos in an album with pagination and sorting (async)."""
+    async with get_async_db() as conn:
         user_id = _get_user_id(user)
-        album = _check_album_access(conn, album_id, user_id)
+        album = await _check_album_access_async(conn, album_id, user_id)
 
         qp = dict(request.query_params)
         try:
@@ -536,7 +565,7 @@ def get_album_photos(
         sort = qp.get('sort', 'position')
         sort_dir = 'ASC' if qp.get('sort_direction', 'ASC') == 'ASC' else 'DESC'
 
-        return _fetch_album_photos(conn, album, user_id, page, per_page, sort, sort_dir)
+        return await _fetch_album_photos(conn, album, user_id, page, per_page, sort, sort_dir)
 
 
 # --- Sharing endpoints ---
@@ -579,15 +608,17 @@ def unshare_album(
 
 
 @router.get("/api/shared/album/{album_id}")
-def get_shared_album(
+async def get_shared_album(
     request: Request,
     album_id: int,
     token: str = Query(...),
     user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
-    """Public endpoint to view a shared album via token."""
-    with get_db() as conn:
-        album = conn.execute("SELECT * FROM albums WHERE id = ?", (album_id,)).fetchone()
+    """Public endpoint to view a shared album via token (async)."""
+    async with get_async_db() as conn:
+        cur = await conn.execute("SELECT * FROM albums WHERE id = ?", (album_id,))
+        album = await cur.fetchone()
+        await cur.close()
         if not album:
             raise HTTPException(status_code=404, detail="Album not found")
 
@@ -674,7 +705,7 @@ def get_shared_album(
             )
             filters = {k: qp[k] for k in _FILTER_KEYS if qp.get(k)}
 
-        result = _fetch_album_photos(conn, album, user_id, page, per_page, sort, sort_dir, filters=filters)
+        result = await _fetch_album_photos(conn, album, user_id, page, per_page, sort, sort_dir, filters=filters)
         result['album'] = _album_to_dict(album)
         result['effective_sort'] = sort
         result['effective_sort_direction'] = sort_dir
@@ -684,7 +715,7 @@ def get_shared_album(
         # Include filter options for manual albums (first page only to avoid repeated work)
         if is_manual and page == 1:
             try:
-                result['filter_options'] = _get_album_filter_options(conn, album['id'])
+                result['filter_options'] = await _get_album_filter_options(conn, album['id'])
             except sqlite3.Error:
                 logger.debug("Failed to build album filter options", exc_info=True)
 

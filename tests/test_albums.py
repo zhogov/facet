@@ -216,14 +216,28 @@ class TestSharing:
 
     def test_shared_album_invalid_token(self, client):
         """GET /api/shared/album/1 with wrong token returns 403."""
+        from contextlib import asynccontextmanager
         album_row = _make_album_row(id=1, share_token="correct-secret-token")
 
-        mock_conn = mock.MagicMock()
-        mock_conn.execute.return_value.fetchone.return_value = album_row
+        class _Cursor:
+            async def fetchone(self):
+                return album_row
+            async def fetchall(self):
+                return []
+            async def close(self):
+                pass
+
+        class _Conn:
+            async def execute(self, *a, **kw):
+                return _Cursor()
+
+        @asynccontextmanager
+        async def _async_cm():
+            yield _Conn()
 
         with (
             mock.patch(f"{_ALBUMS_MODULE}.get_optional_user", return_value=None),
-            mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)),
+            mock.patch(f"{_ALBUMS_MODULE}.get_async_db", _async_cm),
         ):
             resp = client.get("/api/shared/album/1", params={"token": "wrong"})
 
@@ -233,26 +247,51 @@ class TestSharing:
 
     def test_shared_album_valid_token(self, client):
         """GET /api/shared/album/1 with correct token returns album data."""
+        from contextlib import asynccontextmanager
         token = "valid-share-token-abc123"
         album_row = _make_album_row(id=1, name="Shared Vacation", share_token=token)
 
-        mock_conn = mock.MagicMock()
-        # First call: SELECT album by id
-        # Then _fetch_album_photos will make several calls
-        mock_conn.execute.return_value.fetchone.side_effect = [
-            album_row,  # get_shared_album: SELECT * FROM albums WHERE id = ?
-            (0,),       # _fetch_album_photos: COUNT(*)
-        ]
-        mock_conn.execute.return_value.fetchall.return_value = []
+        # Async conn mock — /api/shared/album/{id} now uses get_async_db.
+        class _Cursor:
+            def __init__(self, rows, one):
+                self._rows = rows
+                self._one = one
+            async def fetchall(self):
+                return self._rows
+            async def fetchone(self):
+                return self._one
+            async def close(self):
+                pass
+
+        call_counter = {"n": 0}
+        async def _exec(*args, **kwargs):
+            call_counter["n"] += 1
+            n = call_counter["n"]
+            if n == 1:
+                return _Cursor([], album_row)  # SELECT album
+            if n == 2:
+                return _Cursor([], (0,))  # COUNT(*)
+            return _Cursor([], None)
+
+        class _Conn:
+            async def execute(self, *a, **kw):
+                return await _exec(*a, **kw)
+
+        @asynccontextmanager
+        async def _async_cm():
+            yield _Conn()
+
+        async def _async_noop(*args, **kwargs):
+            return None
 
         with (
             mock.patch(f"{_ALBUMS_MODULE}.get_optional_user", return_value=None),
-            mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)),
+            mock.patch(f"{_ALBUMS_MODULE}.get_async_db", _async_cm),
             mock.patch(f"{_ALBUMS_MODULE}.get_visibility_clause", return_value=("1=1", [])),
             mock.patch(f"{_ALBUMS_MODULE}.get_photos_from_clause", return_value=("photos", [])),
             mock.patch(f"{_ALBUMS_MODULE}.build_photo_select_columns", return_value=["photos.path"]),
             mock.patch(f"{_ALBUMS_MODULE}.split_photo_tags", return_value=[]),
-            mock.patch(f"{_ALBUMS_MODULE}.attach_person_data"),
+            mock.patch(f"{_ALBUMS_MODULE}.attach_person_data_async", _async_noop),
             mock.patch(f"{_ALBUMS_MODULE}.sanitize_float_values"),
             mock.patch(f"{_ALBUMS_MODULE}.VIEWER_CONFIG", {
                 "pagination": {"default_per_page": 48},
