@@ -27,6 +27,10 @@ import numpy as np
 # Prompt sets crafted to anchor the axis without leaking subject-matter bias
 # (no "portrait" vs "landscape" terms, no color words). Edit only if you can
 # show a >=3% SRCC improvement on AVA — otherwise you're tuning to noise.
+#
+# These are the *defaults*; ``load_prompts_from_config()`` lets users override
+# them via ``scoring_config.json`` -> ``aesthetic_clip.positive_prompts`` and
+# ``negative_prompts`` for experimentation without code changes.
 POSITIVE_PROMPTS: tuple[str, ...] = (
     "a professional, high-quality photograph",
     "an aesthetically beautiful image",
@@ -41,6 +45,23 @@ NEGATIVE_PROMPTS: tuple[str, ...] = (
     "a noisy, badly lit photograph",
     "a boring, forgettable image",
 )
+
+
+def load_prompts_from_config(config: dict | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return ``(positive, negative)`` prompts, taking config overrides if present.
+
+    Reads ``aesthetic_clip.positive_prompts`` and ``aesthetic_clip.negative_prompts``
+    from the supplied config dict (typically ``scoring_config.json`` parsed). Empty
+    or missing entries fall back to the module defaults so the axis is always valid.
+    """
+    if not isinstance(config, dict):
+        return POSITIVE_PROMPTS, NEGATIVE_PROMPTS
+    section = config.get("aesthetic_clip", {})
+    if not isinstance(section, dict):
+        return POSITIVE_PROMPTS, NEGATIVE_PROMPTS
+    pos = tuple(p for p in section.get("positive_prompts", []) if isinstance(p, str) and p.strip())
+    neg = tuple(p for p in section.get("negative_prompts", []) if isinstance(p, str) and p.strip())
+    return (pos or POSITIVE_PROMPTS, neg or NEGATIVE_PROMPTS)
 
 
 def build_aesthetic_axis(

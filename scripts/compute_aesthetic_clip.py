@@ -29,9 +29,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from analyzers.aesthetic_clip import (
-    NEGATIVE_PROMPTS,
-    POSITIVE_PROMPTS,
     build_aesthetic_axis,
+    load_prompts_from_config,
     score_embeddings,
 )
 from utils.embedding import bytes_to_embedding
@@ -132,9 +131,12 @@ def main() -> int:
     cached_dim = cached_emb.shape[0]
     print(f"Cached image embeddings: {cached_dim}-dim")
 
-    print(f"Building aesthetic axis from {len(POSITIVE_PROMPTS)}+{len(NEGATIVE_PROMPTS)} prompts ...")
+    from config import ScoringConfig
+    full_cfg = ScoringConfig(validate=False).config
+    pos_prompts, neg_prompts = load_prompts_from_config(full_cfg)
+    print(f"Building aesthetic axis from {len(pos_prompts)}+{len(neg_prompts)} prompts ...")
     encode = _make_text_encoder(model_override=args.model, backend_override=args.backend)
-    axis = build_aesthetic_axis(encode)
+    axis = build_aesthetic_axis(encode, positive_prompts=pos_prompts, negative_prompts=neg_prompts)
     print(f"  axis shape: {axis.shape}")
     if axis.shape[0] != cached_dim:
         print(

@@ -752,7 +752,8 @@ InsightFace face detection settings.
     "min_confidence_percent": 65,
     "min_face_size": 20,
     "blink_ear_threshold": 0.28,
-    "min_faces_for_group": 4
+    "min_faces_for_group": 4,
+    "enable_3d_landmarks": false
   }
 }
 ```
@@ -763,6 +764,7 @@ InsightFace face detection settings.
 | `min_face_size` | `20` | Minimum face size in pixels |
 | `blink_ear_threshold` | `0.28` | Eye Aspect Ratio for blink detection |
 | `min_faces_for_group` | `4` | Minimum faces to classify as group portrait (recomputed on `--recompute-average`) |
+| `enable_3d_landmarks` | `false` | Load InsightFace `landmark_3d_68` module for head-pose extraction (yaw/pitch/roll). Costs ~5MB extra ONNX weights. Currently informational; future profile/silhouette refinements will read this. |
 
 ---
 
@@ -1568,6 +1570,56 @@ Settings for AI caption translation via MarianMT:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `target_language` | `"fr"` | Target language code for `--translate-captions`. Supported: `fr` (French), `de` (German), `es` (Spanish), `it` (Italian). Uses Helsinki-NLP MarianMT models (CPU, no GPU required). |
+
+## Aesthetic CLIP (R2)
+
+Supplementary aesthetic score derived from cached CLIP/SigLIP embeddings via text projection. Prompts are user-tunable for AVA benchmarking — see `scripts/benchmark_aesthetic.py` for measuring the SRCC impact of any change.
+
+```json
+{
+  "aesthetic_clip": {
+    "positive_prompts": [
+      "a professional, high-quality photograph",
+      "an aesthetically beautiful image",
+      "a masterful, award-winning photograph",
+      "a sharp, well-composed photograph",
+      "a stunning, visually striking image"
+    ],
+    "negative_prompts": [
+      "a low-quality, amateur photograph",
+      "a blurry, poorly composed photograph",
+      "an unattractive, mundane snapshot",
+      "a noisy, badly lit photograph",
+      "a boring, forgettable image"
+    ]
+  }
+}
+```
+
+Empty arrays fall back to the module defaults baked into `analyzers/aesthetic_clip.py`. Don't tune these without re-running the AVA benchmark — the defaults score SRCC ~0.52 on `ava_test/` and changes can easily regress to ~0.30.
+
+## Adding alternative VLM tagger / critique models (R3)
+
+Each VRAM profile's `tagging_model` key (e.g. `qwen3.5-2b`) maps to a model entry in the same `models` section. To experiment with a different VLM (Pixtral-12B, InternVL-2.5, etc.):
+
+1. Add a model entry under `models`:
+   ```json
+   "pixtral_12b": {
+     "model_path": "mistralai/Pixtral-12B-2409",
+     "torch_dtype": "bfloat16",
+     "max_new_tokens": 100,
+     "vlm_batch_size": 1
+   }
+   ```
+2. Point a profile at it:
+   ```json
+   "profiles": {
+     "24gb": { "tagging_model": "pixtral_12b", ... }
+   }
+   ```
+3. Run `python facet.py --recompute-tags-vlm` to re-tag.
+
+No code changes needed. Validate quality via a side-by-side spot check on ~30 photos before promoting to default.
 
 ## Share Secret
 

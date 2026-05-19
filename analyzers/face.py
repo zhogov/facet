@@ -20,7 +20,7 @@ class FaceAnalyzer:
 
     def __init__(self, device='cuda', min_confidence=0.7, min_face_size=30,
                  thumbnail_size=128, thumbnail_quality=85, blink_ear_threshold=0.21,
-                 min_faces_for_group=4):
+                 min_faces_for_group=4, enable_3d_landmarks=False):
         self.available = False
         self.min_confidence = min_confidence
         self.min_face_size = min_face_size
@@ -32,16 +32,22 @@ class FaceAnalyzer:
         self.blink_ear_threshold = blink_ear_threshold
         # Minimum number of faces to classify as group portrait
         self.min_faces_for_group = min_faces_for_group
+        # 3D landmarks (head pose: yaw / pitch / roll) — enables future refinements
+        # for silhouette/profile detection. Costs ~5MB extra ONNX weights.
+        self.enable_3d_landmarks = enable_3d_landmarks
         try:
             from insightface.app import FaceAnalysis
             # IMPORTANT: We include 'recognition' for face embeddings used in clustering
+            allowed = ['detection', 'landmark_2d_106', 'recognition']
+            if enable_3d_landmarks:
+                allowed.append('landmark_3d_68')
             with open(os.devnull, 'w') as devnull:
                 _stdout, sys.stdout = sys.stdout, devnull
                 try:
                     self.face_app = FaceAnalysis(
                         name='buffalo_l',
                         root='~/.insightface',
-                        allowed_modules=['detection', 'landmark_2d_106', 'recognition'],
+                        allowed_modules=allowed,
                         providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
                     )
                     self.face_app.prepare(ctx_id=0, det_size=(640, 640))
