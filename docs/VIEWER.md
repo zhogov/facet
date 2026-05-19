@@ -778,7 +778,10 @@ Interactive API documentation is available at `/api/docs` (Swagger UI) and the O
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/persons` | List all persons |
+| `POST /api/persons` | Create a new person, optionally attaching faces (edition-gated). Body: `{name, face_ids}` |
+| `GET /api/persons/needs_naming?min_faces=N` | List unnamed auto-clustered persons with `face_count >= N` (default from `viewer.persons.needs_naming_min_faces`) |
 | `POST /api/persons/{id}/rename` | Rename a person |
+| `POST /api/persons/{id}/assign_faces` | Bulk-attach faces to a person; empty old-persons are auto-deleted (edition-gated). Body: `{face_ids}` |
 | `POST /api/persons/merge` | Merge two persons (JSON body) |
 | `POST /api/persons/merge/{source_id}/{target_id}` | Merge source person into target |
 | `POST /api/persons/merge_batch` | Merge multiple persons at once |

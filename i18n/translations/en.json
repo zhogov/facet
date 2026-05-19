@@ -236,7 +236,6 @@
     "select_face": "Select face to assign",
     "select_person": "Select person",
     "search_persons": "Search persons...",
-    "no_named_persons": "No named persons found",
     "error_loading_persons": "Error loading persons",
     "suggest_merges": "Suggest merges",
     "person_fallback": "Person {id}",

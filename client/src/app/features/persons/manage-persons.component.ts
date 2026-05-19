@@ -126,11 +126,13 @@ export class NewPersonDialogComponent {
         @if (auth.isEdition()) {
           <!-- Small screen: icon-only buttons -->
           <button mat-icon-button class="sm:!hidden" (click)="openNewPersonDialog()"
-                  [matTooltip]="'manage_persons.new_person' | translate">
+                  [matTooltip]="'manage_persons.new_person' | translate"
+                  [attr.aria-label]="'manage_persons.new_person' | translate">
             <mat-icon>person_add</mat-icon>
           </button>
           <a mat-icon-button class="sm:!hidden" routerLink="/merge-suggestions"
-             [matTooltip]="'persons.merge_suggestions' | translate">
+             [matTooltip]="'persons.merge_suggestions' | translate"
+             [attr.aria-label]="'persons.merge_suggestions' | translate">
             <mat-icon>auto_fix_high</mat-icon>
           </a>
           <!-- Larger screens: full buttons with labels -->
@@ -292,10 +294,9 @@ export class ManagePersonsComponent implements OnInit {
     if (!trimmed) return;
     try {
       await firstValueFrom(this.api.post(`/persons/${id}/rename`, { name: trimmed }));
+      // Drop the now-named person from the needs-naming section.
       this.needsNaming.update(list => list.filter(p => p.id !== id));
-      const named: Person = (this.needsNaming().find(p => p.id === id) ?? { id, name: trimmed, face_count: 0, face_thumbnail: false }) as Person;
-      named.name = trimmed;
-      // refresh main grid in case it overlaps with this person
+      // Mirror the new name into the main grid if the same person is rendered there.
       this.persons.update(list => list.map(p => p.id === id ? { ...p, name: trimmed } : p));
       this.snackBar.open(this.i18n.t('persons.renamed'), '', { duration: 2000 });
     } catch {

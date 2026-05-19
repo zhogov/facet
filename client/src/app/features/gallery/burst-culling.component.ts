@@ -247,7 +247,9 @@ interface CullingGroupsResponse {
             <span>Space {{ 'culling.confirm' | translate }}</span>
             <span>Esc {{ 'dialog.cancel' | translate }}</span>
           </div>
-          <button mat-icon-button (click)="closeLightbox(); $event.stopPropagation()" class="!text-white">
+          <button mat-icon-button
+                  [attr.aria-label]="'dialog.cancel' | translate"
+                  (click)="closeLightbox(); $event.stopPropagation()" class="!text-white">
             <mat-icon>close</mat-icon>
           </button>
         </div>
@@ -474,18 +476,22 @@ export class BurstCullingComponent implements OnDestroy {
     this.lightboxIndex.update(i => this.clampIndex(i + 1, group.photos.length));
   }
 
+  private setCurrentLightboxPhotoKept(group: CullingGroup, keep: boolean): void {
+    const photo = group.photos[this.lightboxIndex()];
+    if (!photo) return;
+    const map = new Map(this.selectionsMap());
+    const kept = new Set(map.get(group.group_id) ?? []);
+    if (keep) kept.add(photo.path); else kept.delete(photo.path);
+    map.set(group.group_id, kept);
+    this.selectionsMap.set(map);
+  }
+
   @HostListener('document:keydown.arrowup', ['$event'])
   protected onArrowUp(event: Event): void {
     const group = this.lightboxGroup();
     if (!group) return;
     event.preventDefault();
-    const photo = group.photos[this.lightboxIndex()];
-    if (!photo) return;
-    const map = new Map(this.selectionsMap());
-    const kept = new Set(map.get(group.group_id) ?? []);
-    kept.add(photo.path);
-    map.set(group.group_id, kept);
-    this.selectionsMap.set(map);
+    this.setCurrentLightboxPhotoKept(group, true);
   }
 
   @HostListener('document:keydown.arrowdown', ['$event'])
@@ -493,13 +499,7 @@ export class BurstCullingComponent implements OnDestroy {
     const group = this.lightboxGroup();
     if (!group) return;
     event.preventDefault();
-    const photo = group.photos[this.lightboxIndex()];
-    if (!photo) return;
-    const map = new Map(this.selectionsMap());
-    const kept = new Set(map.get(group.group_id) ?? []);
-    kept.delete(photo.path);
-    map.set(group.group_id, kept);
-    this.selectionsMap.set(map);
+    this.setCurrentLightboxPhotoKept(group, false);
   }
 
   @HostListener('document:keydown.space', ['$event'])

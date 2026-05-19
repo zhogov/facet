@@ -1001,6 +1001,9 @@ Web gallery display and behavior.
       "max_tags": 20,
       "min_photos_for_person": 10
     },
+    "persons": {
+      "needs_naming_min_faces": 5
+    },
     "raw_processor": {
       "backend": "rawpy",
       "darktable": {
@@ -1051,7 +1054,7 @@ Web gallery display and behavior.
       "hide_bursts": true,
       "hide_duplicates": true,
       "hide_details": true,
-      "hide_tooltip": false,
+      "tooltip_mode": "hover",
       "hide_rejected": true,
       "sort": "aggregate",
       "sort_direction": "DESC",
@@ -1081,6 +1084,8 @@ Web gallery display and behavior.
 | `max_persons` | `50` | Max persons |
 | `max_tags` | `20` | Max tags |
 | `min_photos_for_person` | `10` | Hide persons with fewer photos from dropdown |
+| **persons** | | |
+| `needs_naming_min_faces` | `5` | Minimum face_count for an auto-clustered cluster to appear in the "Needs naming" section of `/persons` |
 | **raw_processor** | | |
 | `darktable.executable` | `"darktable-cli"` | darktable-cli binary name or absolute path |
 | `darktable.profiles` | `[]` | Array of named darktable export profiles (see below) |
@@ -1120,7 +1125,7 @@ Web gallery display and behavior.
 | `hide_bursts` | `true` | Show only best of burst by default |
 | `hide_duplicates` | `true` | Hide non-lead duplicate photos by default |
 | `hide_details` | `true` | Hide photo details on cards by default |
-| `hide_tooltip` | `false` | Hide hover tooltip on cards by default |
+| `tooltip_mode` | `"hover"` | Tooltip trigger: `"hover"`, `"click"`, or `"off"`. Replaces the prior `hide_tooltip` boolean. |
 | `hide_rejected` | `true` | Hide rejected photos by default |
 | `gallery_mode` | `"mosaic"` | Default gallery layout (`"grid"` or `"mosaic"`) |
 | **allowed_origins** | | |

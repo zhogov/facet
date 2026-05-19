@@ -56,33 +56,37 @@ def _print_scan_summary(db_path, todo_list, raw_paired_skipped):
 
     Counts photos in `todo_list` paths that ended up in the DB and how many of
     them are hidden by default (blinks, non-lead bursts, non-lead duplicates).
+    Chunks the IN-list to stay under SQLite's variable-binding limit.
     """
     import sqlite3
     if not todo_list:
         return
     paths = [str(f.resolve()) for f in todo_list]
-    placeholders = ",".join("?" * len(paths))
+    scored = blinks = bursts_non_lead = duplicates_non_lead = 0
+    CHUNK = 500
     try:
         with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                f"""SELECT
-                    COUNT(*) AS scored,
-                    SUM(CASE WHEN is_blink = 1 THEN 1 ELSE 0 END) AS blinks,
-                    SUM(CASE WHEN is_burst_lead = 0 THEN 1 ELSE 0 END) AS bursts_non_lead,
-                    SUM(CASE WHEN is_duplicate_lead = 0
-                              AND duplicate_group_id IS NOT NULL THEN 1 ELSE 0 END) AS duplicates_non_lead
-                FROM photos WHERE path IN ({placeholders})""",
-                paths,
-            ).fetchone()
+            for i in range(0, len(paths), CHUNK):
+                chunk = paths[i:i + CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                row = conn.execute(
+                    f"""SELECT
+                        COUNT(*) AS scored,
+                        COALESCE(SUM(CASE WHEN is_blink = 1 THEN 1 ELSE 0 END), 0) AS blinks,
+                        COALESCE(SUM(CASE WHEN is_burst_lead = 0 THEN 1 ELSE 0 END), 0) AS bursts_non_lead,
+                        COALESCE(SUM(CASE WHEN is_duplicate_lead = 0
+                                  AND duplicate_group_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS duplicates_non_lead
+                    FROM photos WHERE path IN ({placeholders})""",
+                    chunk,
+                ).fetchone()
+                if row:
+                    scored += row[0]
+                    blinks += row[1]
+                    bursts_non_lead += row[2]
+                    duplicates_non_lead += row[3]
     except sqlite3.Error:
+        logger.exception("Failed to compute scan summary")
         return
-    if not row:
-        return
-    scored, blinks, bursts_non_lead, duplicates_non_lead = row
-    scored = scored or 0
-    blinks = blinks or 0
-    bursts_non_lead = bursts_non_lead or 0
-    duplicates_non_lead = duplicates_non_lead or 0
 
     logger.info("")
     logger.info("=" * 60)

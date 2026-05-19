@@ -240,7 +240,6 @@
     "select_face": "Gesicht auswählen",
     "select_person": "Person auswählen",
     "search_persons": "Personen suchen...",
-    "no_named_persons": "Keine benannten Personen gefunden",
     "error_loading_persons": "Fehler beim Laden der Personen",
     "suggest_merges": "Zusammenführungen vorschlagen",
     "person_fallback": "Person {id}",

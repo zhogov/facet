@@ -236,7 +236,6 @@
     "select_face": "Seleziona volto da assegnare",
     "select_person": "Seleziona persona",
     "search_persons": "Cerca persone...",
-    "no_named_persons": "Nessuna persona nominata trovata",
     "error_loading_persons": "Errore nel caricamento delle persone",
     "suggest_merges": "Suggerisci unioni",
     "person_fallback": "Persona {id}",

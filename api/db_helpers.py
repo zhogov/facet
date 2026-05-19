@@ -302,6 +302,59 @@ def update_person_face_count(conn, person_id):
     """, (person_id, person_id))
 
 
+def reassign_faces_to_person(conn, person_id, face_ids):
+    """Reassign a set of faces to ``person_id``; auto-delete emptied old persons.
+
+    Validates that every face_id exists, moves them to the new person, refreshes
+    face_count on both old and new persons, and deletes any old person whose
+    face_count drops to zero.
+
+    Returns a dict with: ``assigned_count``, ``face_count`` (final count on
+    ``person_id``), and ``deleted_persons`` (list of auto-deleted old IDs).
+    Raises ``LookupError`` if any face_id is unknown.
+    """
+    if not face_ids:
+        return {"assigned_count": 0, "face_count": 0, "deleted_persons": []}
+
+    placeholders = ",".join("?" * len(face_ids))
+    existing = conn.execute(
+        f"SELECT id, person_id FROM faces WHERE id IN ({placeholders})",
+        face_ids,
+    ).fetchall()
+    if len(existing) != len(face_ids):
+        raise LookupError("One or more face_ids not found")
+
+    old_person_ids = {
+        row["person_id"] for row in existing
+        if row["person_id"] is not None and row["person_id"] != person_id
+    }
+
+    conn.execute(
+        f"UPDATE faces SET person_id = ? WHERE id IN ({placeholders})",
+        [person_id] + list(face_ids),
+    )
+
+    update_person_face_count(conn, person_id)
+    deleted_persons = []
+    for old_id in old_person_ids:
+        update_person_face_count(conn, old_id)
+        row = conn.execute(
+            "SELECT face_count FROM persons WHERE id = ?", (old_id,)
+        ).fetchone()
+        if row and row[0] == 0:
+            conn.execute("DELETE FROM persons WHERE id = ?", (old_id,))
+            deleted_persons.append(old_id)
+
+    row = conn.execute(
+        "SELECT face_count FROM persons WHERE id = ?", (person_id,)
+    ).fetchone()
+    return {
+        "assigned_count": len(face_ids),
+        "face_count": row[0] if row else 0,
+        "deleted_persons": deleted_persons,
+    }
+
+
 def split_photo_tags(rows, tags_limit):
     """Convert DB rows to dicts with pre-split tags_list."""
     photos = []

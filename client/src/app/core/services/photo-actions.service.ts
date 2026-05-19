@@ -46,6 +46,8 @@ export class PhotoActionsService {
               if (created) {
                 this.snackBar.open(this.i18n.t('notifications.faces_assigned'), '', { duration: 2000 });
                 onAssigned?.();
+              } else {
+                this.snackBar.open(this.i18n.t('persons.create_error'), '', { duration: 3000 });
               }
             } else if (result.kind === 'select') {
               await this.store.assignFace(face.id, result.person.id, photo.path, result.person.name);

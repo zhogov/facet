@@ -236,7 +236,6 @@
     "select_face": "Seleccionar rostro a asignar",
     "select_person": "Seleccionar persona",
     "search_persons": "Buscar personas...",
-    "no_named_persons": "No se encontraron personas con nombre",
     "error_loading_persons": "Error al cargar personas",
     "suggest_merges": "Sugerir fusiones",
     "person_fallback": "Persona {id}",

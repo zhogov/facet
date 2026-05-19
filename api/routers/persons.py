@@ -5,15 +5,15 @@ Persons API router -- person management.
 
 import logging
 import sqlite3
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.auth import CurrentUser, require_edition, require_authenticated
 from api.config import VIEWER_CONFIG
 from api.database import get_db
-from api.db_helpers import update_person_face_count
+from api.db_helpers import reassign_faces_to_person
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +51,11 @@ class DeleteBatchRequest(BaseModel):
 
 class CreatePersonRequest(BaseModel):
     name: str
-    face_ids: List[int] = []
+    face_ids: List[int] = Field(default_factory=list, max_length=500)
 
 
 class AssignFacesRequest(BaseModel):
-    face_ids: List[int]
+    face_ids: List[int] = Field(min_length=1, max_length=500)
 
 
 # --- Endpoints ---
@@ -281,11 +281,11 @@ def delete_persons_batch(
 
 @router.get("/api/persons/needs_naming")
 def api_persons_needs_naming(
-    min_faces: int = Query(0, ge=0),
+    min_faces: Optional[int] = Query(None, ge=0),
     user: CurrentUser = Depends(require_authenticated),
 ):
     """List unnamed auto-clustered persons with face_count >= min_faces (default from config)."""
-    if not min_faces:
+    if min_faces is None:
         try:
             min_faces = int(VIEWER_CONFIG.get('persons', {}).get('needs_naming_min_faces', 5))
         except (TypeError, ValueError):
@@ -325,43 +325,16 @@ def api_create_person(
             )
             person_id = cursor.lastrowid
 
-            old_person_ids: set[int] = set()
-            assigned_count = 0
+            face_count = 0
             if body.face_ids:
-                placeholders = ",".join("?" * len(body.face_ids))
-                existing = conn.execute(
-                    f"SELECT id, person_id FROM faces WHERE id IN ({placeholders})",
-                    body.face_ids,
-                ).fetchall()
-                if len(existing) != len(body.face_ids):
-                    raise HTTPException(status_code=404, detail="One or more face_ids not found")
-
-                for row in existing:
-                    if row["person_id"] is not None and row["person_id"] != person_id:
-                        old_person_ids.add(row["person_id"])
-
-                conn.execute(
-                    f"UPDATE faces SET person_id = ? WHERE id IN ({placeholders})",
-                    [person_id] + list(body.face_ids),
-                )
-                assigned_count = len(body.face_ids)
-
-                update_person_face_count(conn, person_id)
-                for old_id in old_person_ids:
-                    update_person_face_count(conn, old_id)
-                    row = conn.execute(
-                        "SELECT face_count FROM persons WHERE id = ?", (old_id,)
-                    ).fetchone()
-                    if row and row[0] == 0:
-                        conn.execute("DELETE FROM persons WHERE id = ?", (old_id,))
-
-            row = conn.execute(
-                "SELECT face_count FROM persons WHERE id = ?", (person_id,)
-            ).fetchone()
-            face_count = row[0] if row else assigned_count
+                result = reassign_faces_to_person(conn, person_id, body.face_ids)
+                face_count = result["face_count"]
 
             conn.commit()
             return {"id": person_id, "name": name, "face_count": face_count}
+        except LookupError as e:
+            conn.rollback()
+            raise HTTPException(status_code=404, detail=str(e))
         except HTTPException:
             raise
         except sqlite3.Error:
@@ -377,9 +350,6 @@ def api_assign_faces_batch(
     user: CurrentUser = Depends(require_edition),
 ):
     """Bulk-assign a set of faces to a person. Empties old persons are auto-deleted."""
-    if not body.face_ids:
-        raise HTTPException(status_code=400, detail="face_ids is required")
-
     with get_db() as conn:
         try:
             target = conn.execute(
@@ -388,39 +358,9 @@ def api_assign_faces_batch(
             if not target:
                 raise HTTPException(status_code=404, detail="Target person not found")
 
-            placeholders = ",".join("?" * len(body.face_ids))
-            existing = conn.execute(
-                f"SELECT id, person_id FROM faces WHERE id IN ({placeholders})",
-                body.face_ids,
-            ).fetchall()
-            if len(existing) != len(body.face_ids):
-                raise HTTPException(status_code=404, detail="One or more face_ids not found")
-
-            old_person_ids: set[int] = set()
-            for row in existing:
-                if row["person_id"] is not None and row["person_id"] != person_id:
-                    old_person_ids.add(row["person_id"])
-
-            conn.execute(
-                f"UPDATE faces SET person_id = ? WHERE id IN ({placeholders})",
-                [person_id] + list(body.face_ids),
-            )
-
-            update_person_face_count(conn, person_id)
-            deleted_persons: list[int] = []
-            for old_id in old_person_ids:
-                update_person_face_count(conn, old_id)
-                row = conn.execute(
-                    "SELECT face_count FROM persons WHERE id = ?", (old_id,)
-                ).fetchone()
-                if row and row[0] == 0:
-                    conn.execute("DELETE FROM persons WHERE id = ?", (old_id,))
-                    deleted_persons.append(old_id)
-
-            row = conn.execute(
-                "SELECT face_count FROM persons WHERE id = ?", (person_id,)
-            ).fetchone()
-            face_count = row[0] if row else 0
+            result = reassign_faces_to_person(conn, person_id, body.face_ids)
+            face_count = result["face_count"]
+            deleted_persons = result["deleted_persons"]
 
             conn.commit()
             return {
@@ -430,6 +370,9 @@ def api_assign_faces_batch(
                 "face_count": face_count,
                 "deleted_persons": deleted_persons,
             }
+        except LookupError as e:
+            conn.rollback()
+            raise HTTPException(status_code=404, detail=str(e))
         except HTTPException:
             raise
         except sqlite3.Error:

@@ -70,6 +70,7 @@ import { InfiniteScrollDirective } from '../../shared/directives/infinite-scroll
         <div class="flex items-center gap-2 px-2 md:px-4 pt-2 md:pt-4">
           <button mat-icon-button
                   [matTooltip]="'gallery.tooltip_mode.label' | translate"
+                  [attr.aria-label]="'gallery.tooltip_mode.label' | translate"
                   [matMenuTriggerFor]="tooltipMenu">
             <mat-icon>{{ tooltipModeIcon() }}</mat-icon>
           </button>
