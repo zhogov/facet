@@ -1425,6 +1425,15 @@ Configuration:
 
     _print_scan_summary(scorer.db_path, todo_list, raw_paired_skipped)
 
+    # Auto-populate sqlite-vec table so semantic search is fast on first viewer
+    # load after a scan. Idempotent: skips when already up-to-date, no-ops when
+    # sqlite-vec isn't installed.
+    try:
+        from db.vec import populate_vec_table
+        populate_vec_table(scorer.db_path)
+    except Exception:
+        logger.warning("Auto-populate of photos_vec failed (non-fatal)", exc_info=True)
+
     logger.info("All tasks complete.")
 
 

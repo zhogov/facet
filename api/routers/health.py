@@ -5,10 +5,15 @@ Provides /health (liveness) and /ready (readiness) for orchestrators
 and load balancers.
 """
 
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel, Field
 
 from api.database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
@@ -107,3 +112,33 @@ def metrics():
 
     body = "\n".join(lines) + "\n"
     return PlainTextResponse(body, media_type="text/plain; version=0.0.4")
+
+
+class ClientErrorReport(BaseModel):
+    """A crash report posted by the Angular GlobalErrorHandler."""
+    message: str = Field(default="", max_length=2000)
+    name: str | None = Field(default=None, max_length=200)
+    stack: str | None = Field(default=None, max_length=8000)
+    url: str | None = Field(default=None, max_length=2000)
+    user_agent: str | None = Field(default=None, max_length=500)
+    ts: str | None = Field(default=None, max_length=64)
+
+
+@router.post("/api/client-errors")
+def report_client_error(report: ClientErrorReport, request: Request):
+    """Receive an SPA crash report and log it server-side.
+
+    No DB writes — these are diagnostic logs only. Rate-limit-friendly: the
+    GlobalErrorHandler caps in-flight reports at 5 to avoid floods.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    logger.warning(
+        "SPA error from %s — %s: %s (url=%s)",
+        client_ip,
+        report.name or "Error",
+        report.message,
+        report.url,
+    )
+    if report.stack:
+        logger.warning("SPA stack:\n%s", report.stack)
+    return {"received": True}
