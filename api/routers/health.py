@@ -7,9 +7,9 @@ and load balancers.
 
 import collections
 import logging
-import os
 import threading
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from api.config import _FULL_CONFIG
 from api.database import get_async_db, get_db
+from db import DEFAULT_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +191,6 @@ def metrics(request: Request):
 
     # DB file size on disk (sum of main file + WAL + SHM)
     try:
-        from pathlib import Path
-        from db import DEFAULT_DB_PATH
         db_path = Path(DEFAULT_DB_PATH)
         total_bytes = 0
         for suffix in ("", "-wal", "-shm"):
@@ -295,13 +294,16 @@ def metrics(request: Request):
             "Number of cached SELECT COUNT(*) results in the in-memory cache",
         )
         # stats_cache_age = seconds since the oldest entry was stored.
-        # 0 if empty. An entry's `expires` is (stored_at + ttl), so
-        # `expires - ttl` recovers stored_at; we use `expires - now` and
-        # report the largest absolute age (= ttl - remaining).
+        # An entry's `expires` is set via `time.time() + ttl` (see
+        # api/config.py:_get_stats_cached), so the age MUST be computed in the
+        # same clock domain — using time.monotonic() here would silently
+        # report 0 forever because `expires - monotonic_now` evaluates to a
+        # huge positive (it's roughly wall-clock time) which the `ttl - …`
+        # then clamps to 0.
         if _stats_cache:
-            ttl = max(0.0, float(_FULL_CONFIG.get("viewer", {}).get("cache_ttl_seconds", 60)))
-            now_mono = time.monotonic()
-            ages = [max(0.0, ttl - (e["expires"] - now_mono)) for e in _stats_cache.values()]
+            ttl = max(0.0, float(_FULL_CONFIG.get("viewer", {}).get("cache_ttl_seconds", 3600)))
+            now_wall = time.time()
+            ages = [max(0.0, ttl - (e["expires"] - now_wall)) for e in _stats_cache.values()]
             gauge(
                 "facet_stats_cache_age_seconds",
                 round(max(ages), 1),
@@ -315,20 +317,29 @@ def metrics(request: Request):
 
     # WAL checkpoint thread liveness — if the thread died silently, the
     # `-wal` file grows unbounded between restarts. wal_file_size_bytes
-    # tracks the symptom directly.
+    # tracks the symptom directly. The `enabled` gauge distinguishes
+    # "intentionally disabled" (config sets wal_checkpoint_minutes=0) from
+    # "thread died" — both would otherwise read alive=0.
     try:
         wal_thread = getattr(request.app.state, "wal_thread", None)
+        enabled = wal_thread is not None
         gauge(
-            "facet_wal_thread_alive",
-            1 if (wal_thread is not None and wal_thread.is_alive()) else 0,
-            "1 if the periodic WAL checkpoint thread is running",
+            "facet_wal_thread_enabled",
+            1 if enabled else 0,
+            "1 if WAL checkpoint thread is configured to run (performance.wal_checkpoint_minutes > 0)",
         )
+        if enabled:
+            gauge(
+                "facet_wal_thread_alive",
+                1 if wal_thread.is_alive() else 0,
+                "1 if the periodic WAL checkpoint thread is running; 0 here = thread died silently",
+            )
     except Exception:
         pass
 
     try:
-        from pathlib import Path
-        from db import DEFAULT_DB_PATH
+        # Path + DEFAULT_DB_PATH are already imported above for the db_size
+        # gauge; reuse rather than reimporting.
         wal_path = Path(DEFAULT_DB_PATH + "-wal")
         wal_size = wal_path.stat().st_size if wal_path.exists() else 0
         gauge(

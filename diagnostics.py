@@ -280,11 +280,19 @@ def check_fast_paths(db_path):
     try:
         with sqlite3.connect(db_path) as conn:
             # photos_vec table populated?
+            # Extension load can raise NotSupportedError on CPython builds
+            # compiled without --enable-loadable-sqlite-extensions (common on
+            # Windows/macOS stock binaries). Catch broadly and continue so
+            # the photos_fts / photo_tags / stats_cache probes that follow
+            # remain independent.
             try:
                 if sqlite_vec_module is not None:
                     conn.enable_load_extension(True)
                     sqlite_vec_module.load(conn)
                     conn.enable_load_extension(False)
+            except Exception as e:
+                _warn("sqlite-vec load", str(e))
+            try:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='photos_vec'"
                 ).fetchone()

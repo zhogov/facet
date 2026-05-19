@@ -62,10 +62,7 @@ class TestListAlbums:
         # Album rows: empty
         mock_conn.execute.return_value.fetchall.return_value = []
 
-        with (
-            mock.patch(f"{_ALBUMS_MODULE}.get_optional_user", return_value=None),
-            mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)),
-        ):
+        with mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)):
             resp = client.get("/api/albums")
 
         assert resp.status_code == 200
@@ -93,10 +90,7 @@ class TestListAlbums:
             [count_row],  # photo count batch
         ]
 
-        with (
-            mock.patch(f"{_ALBUMS_MODULE}.get_optional_user", return_value=None),
-            mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)),
-        ):
+        with mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)):
             resp = client.get("/api/albums")
 
         assert resp.status_code == 200
@@ -155,10 +149,7 @@ class TestCrud:
         mock_conn = mock.MagicMock()
         mock_conn.execute.return_value.fetchone.return_value = None
 
-        with (
-            mock.patch(f"{_ALBUMS_MODULE}.get_optional_user", return_value=None),
-            mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)),
-        ):
+        with mock.patch(f"{_ALBUMS_MODULE}.get_db", return_value=nullcontext(mock_conn)):
             resp = client.get("/api/albums/999")
 
         assert resp.status_code == 404
@@ -234,10 +225,11 @@ class TestSharing:
         async def _async_cm():
             yield _Conn()
 
-        with (
-            mock.patch(f"{_ALBUMS_MODULE}.get_optional_user", return_value=None),
-            mock.patch(f"{_ALBUMS_MODULE}.get_async_db", _async_cm),
-        ):
+        # Share-token endpoint is public by design — the share token IS the
+        # auth. Tested via the regular ``client`` fixture; user state is
+        # immaterial because the token check short-circuits before any
+        # user-based filtering.
+        with mock.patch(f"{_ALBUMS_MODULE}.get_async_db", _async_cm):
             resp = client.get("/api/shared/album/1", params={"token": "wrong"})
 
         assert resp.status_code == 403
@@ -283,8 +275,8 @@ class TestSharing:
         async def _async_noop(*args, **kwargs):
             return None
 
+        # Share-token endpoint is public by design — see comment above.
         with (
-            mock.patch(f"{_ALBUMS_MODULE}.get_optional_user", return_value=None),
             mock.patch(f"{_ALBUMS_MODULE}.get_async_db", _async_cm),
             mock.patch(f"{_ALBUMS_MODULE}.get_visibility_clause", return_value=("1=1", [])),
             mock.patch(f"{_ALBUMS_MODULE}.get_photos_from_clause", return_value=("photos", [])),

@@ -286,6 +286,19 @@ def _get_stats_cached(cache_key, compute_fn):
         _stats_cache[cache_key] = {'data': data, 'expires': now + VIEWER_CONFIG['cache_ttl_seconds']}
     return data
 
+
+def invalidate_stats_cache():
+    """Clear the in-memory stats cache under the lock.
+
+    Use this helper from mutation endpoints instead of touching
+    ``_stats_cache.clear()`` directly — the module's discipline is "always
+    under the lock," and bare ``.clear()`` calls mix locked-readers with
+    unlocked-writers. dict.clear() is GIL-atomic so there's no corruption
+    today, but the consistency matters if anyone later adds iteration.
+    """
+    with _stats_cache_lock:
+        _stats_cache.clear()
+
 # --- CORRELATION QUERY WHITELISTS ---
 CORRELATION_X_AXES = {
     'iso': {
