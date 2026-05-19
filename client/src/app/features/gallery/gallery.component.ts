@@ -123,6 +123,8 @@ import { InfiniteScrollDirective } from '../../shared/directives/infinite-scroll
                   [isEditionMode]="auth.isEdition()"
                   [personFilterId]="store.filters().person_id"
                   [tooltipMode]="tooltipMode()"
+                  [style.content-visibility]="'auto'"
+                  [style.contain-intrinsic-size]="'auto ' + (cardWidth() + 80) + 'px'"
                   (selectionChange)="toggleSelection($event.photo, $event.event)"
                   (tooltipShow)="showTooltip($event.event, $event.photo)"
                   (tooltipHide)="hideTooltip()"

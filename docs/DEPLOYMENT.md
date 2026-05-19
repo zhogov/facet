@@ -372,3 +372,80 @@ To allow the superadmin to trigger photo scans from the viewer UI (only useful w
   }
 }
 ```
+
+## Continuous Backups with Litestream
+
+Facet's SQLite database can grow to tens of gigabytes (the production `photo_scores_pro.db` is ~14 GB after scoring 20k+ photos). A single-disk failure costs weeks of GPU time. [Litestream](https://litestream.io/) streams the WAL to S3, B2, GCS, SFTP, or another local disk continuously, with point-in-time restore granularity of a few seconds.
+
+This is **opt-in** — Facet does not bundle Litestream. Install it once on the host running the viewer / scoring; it then runs as a sidecar process and is transparent to the application.
+
+### Why it works well with Facet
+
+- WAL mode is already enabled (`db/connection.py:apply_pragmas`).
+- The new periodic checkpoint thread (default every 30 min, configurable via `performance.wal_checkpoint_minutes`) keeps the WAL bounded.
+- Reads remain unblocked while replication happens.
+
+### Minimal Litestream config
+
+```yaml
+# /etc/litestream.yml
+dbs:
+  - path: /opt/facet/photo_scores_pro.db
+    replicas:
+      # Cheap object storage; replace with the bucket of your choice.
+      - type: s3
+        bucket: my-facet-backups
+        path: photo_scores_pro
+        region: us-east-1
+        access-key-id:     $LITESTREAM_AWS_KEY
+        secret-access-key: $LITESTREAM_AWS_SECRET
+        retention: 72h               # keep 3 days of point-in-time history
+        snapshot-interval: 24h        # full snapshot once per day
+        validation-interval: 6h       # detect corruption early
+```
+
+### Systemd unit
+
+```ini
+# /etc/systemd/system/litestream.service
+[Unit]
+Description=Litestream continuous SQLite replication
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/litestream replicate -config /etc/litestream.yml
+Restart=always
+User=facet
+EnvironmentFile=/etc/litestream.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`litestream.env` holds the AWS / B2 credentials so they stay out of the YAML.
+
+### Restore drill
+
+Practice this before you need it:
+
+```bash
+sudo systemctl stop facet-viewer
+sudo systemctl stop litestream
+litestream restore -o /tmp/restored.db s3://my-facet-backups/photo_scores_pro
+# verify
+sqlite3 /tmp/restored.db "SELECT COUNT(*) FROM photos;"
+# swap in
+sudo mv /opt/facet/photo_scores_pro.db /opt/facet/photo_scores_pro.bad
+sudo mv /tmp/restored.db /opt/facet/photo_scores_pro.db
+sudo chown facet:facet /opt/facet/photo_scores_pro.db
+sudo systemctl start litestream
+sudo systemctl start facet-viewer
+```
+
+### Cost ballpark
+
+For the 14 GB DB with ~50 MB/day of WAL churn during active scoring, expect:
+- ~$0.30/month for storage on S3 Standard
+- ~$0.05/month for PUT operations
+Negligible compared to a re-scan: ~50 GPU-hours on a 16 GB RTX.
