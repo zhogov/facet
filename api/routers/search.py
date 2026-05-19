@@ -1,9 +1,11 @@
 """
-Semantic text-to-image search router.
+Semantic text-to-image search router (async).
 
 Uses CLIP/SigLIP embeddings to find photos matching a natural language query.
+Fully migrated to aiosqlite per the R7 closure batch.
 """
 
+import asyncio
 import logging
 import sqlite3
 from typing import Optional
@@ -13,11 +15,11 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from api.auth import CurrentUser, get_optional_user
 from api.config import VIEWER_CONFIG
-from api.database import get_db
+from api.database import get_async_db
 from api.db_helpers import (
     get_existing_columns, get_visibility_clause, get_photos_from_clause,
     get_preference_columns, PHOTO_BASE_COLS, PHOTO_OPTIONAL_COLS,
-    split_photo_tags, attach_person_data, format_date, sanitize_float_values,
+    split_photo_tags, attach_person_data_async, format_date, sanitize_float_values,
 )
 from db.connection import HAS_SQLITE_VEC
 
@@ -30,7 +32,7 @@ _vec_available = None
 _vec_checked_at = 0.0
 
 
-def _check_vec_available(conn):
+async def _check_vec_available(conn):
     """Check if the photos_vec virtual table exists and has rows (TTL cached)."""
     import time
     global _vec_available, _vec_checked_at
@@ -42,14 +44,18 @@ def _check_vec_available(conn):
         _vec_checked_at = now
         return False
     try:
-        row = conn.execute(
+        cur = await conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='photos_vec'"
-        ).fetchone()
+        )
+        row = await cur.fetchone()
+        await cur.close()
         if not row or row[0] == 0:
             _vec_available = False
             _vec_checked_at = now
             return False
-        exists = conn.execute("SELECT 1 FROM photos_vec LIMIT 1").fetchone()
+        cur = await conn.execute("SELECT 1 FROM photos_vec LIMIT 1")
+        exists = await cur.fetchone()
+        await cur.close()
         _vec_available = exists is not None
     except sqlite3.Error:
         _vec_available = False
@@ -131,8 +137,8 @@ def _encode_texts(queries: list[str]) -> np.ndarray:
         return text_features.cpu().numpy().astype(np.float32)
 
 
-def _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params):
-    """KNN search via sqlite-vec, filtered by visibility.
+async def _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params):
+    """KNN search via sqlite-vec, filtered by visibility (async).
 
     sqlite-vec vec_distance_cosine returns distance (0 = identical, 2 = opposite).
     Similarity = 1 - distance.
@@ -142,14 +148,16 @@ def _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params):
     k = min(limit * 4, 1000)
     query_bytes = text_emb.tobytes()
 
-    rows = conn.execute(
+    cur = await conn.execute(
         '''
         SELECT v.path, v.distance
         FROM photos_vec v
         WHERE v.embedding MATCH ? AND k = ?
         ''',
         [query_bytes, k]
-    ).fetchall()
+    )
+    rows = await cur.fetchall()
+    await cur.close()
 
     if not rows:
         return {}
@@ -160,10 +168,12 @@ def _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params):
 
     if vis_sql != '1=1':
         placeholders = ','.join(['?'] * len(candidate_paths))
-        visible = conn.execute(
+        cur = await conn.execute(
             f"SELECT path FROM photos WHERE path IN ({placeholders}) AND {vis_sql}",
             candidate_paths + vis_params
-        ).fetchall()
+        )
+        visible = await cur.fetchall()
+        await cur.close()
         visible_paths = {r['path'] for r in visible}
     else:
         visible_paths = set(candidate_paths)
@@ -181,69 +191,80 @@ def _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params):
     return scores
 
 
-def _load_embedding_matrix(conn, vis_sql, vis_params, user_id):
-    """Fallback: load all photo embeddings into a numpy matrix."""
+async def _load_embedding_matrix(conn, vis_sql, vis_params, user_id):
+    """Fallback: load all photo embeddings into a numpy matrix (async)."""
     global _embedding_cache
     from utils.embedding import bytes_to_normalized_embedding, filter_uniform_embeddings
 
-    row = conn.execute(
+    cur = await conn.execute(
         f"SELECT COUNT(*) FROM photos WHERE clip_embedding IS NOT NULL AND {vis_sql}",
         vis_params
-    ).fetchone()
+    )
+    row = await cur.fetchone()
+    await cur.close()
     count = row[0] if row else 0
 
     if _embedding_cache and _embedding_cache['count'] == count and _embedding_cache['user_id'] == user_id:
         return _embedding_cache['matrix'], _embedding_cache['paths']
 
-    rows = conn.execute(
+    cur = await conn.execute(
         f"SELECT path, clip_embedding FROM photos WHERE clip_embedding IS NOT NULL AND {vis_sql}",
         vis_params
-    ).fetchall()
+    )
+    rows = await cur.fetchall()
+    await cur.close()
 
-    paths = []
-    embeddings = []
-    for row in rows:
-        emb = bytes_to_normalized_embedding(row['clip_embedding'])
-        if emb is not None:
-            paths.append(row['path'])
-            embeddings.append(emb)
+    # Numpy work below is CPU-bound — push it off the event loop. For 100k photos
+    # this can be ~50ms which is meaningful at moderate concurrency.
+    def _build_matrix(rows):
+        paths_ = []
+        embeddings_ = []
+        for r in rows:
+            emb = bytes_to_normalized_embedding(r['clip_embedding'])
+            if emb is not None:
+                paths_.append(r['path'])
+                embeddings_.append(emb)
+        embeddings_, paths_ = filter_uniform_embeddings(embeddings_, paths_)
+        if not embeddings_:
+            return None, []
+        return np.stack(embeddings_, axis=0), paths_
 
-    # Filter to uniform embedding dimension (CLIP 768 vs SigLIP 1152)
-    embeddings, paths = filter_uniform_embeddings(embeddings, paths)
-
-    if not embeddings:
+    matrix, paths = await asyncio.to_thread(_build_matrix, rows)
+    if matrix is None:
         _embedding_cache = None
         return None, []
 
-    matrix = np.stack(embeddings, axis=0)
     _embedding_cache = {'matrix': matrix, 'paths': paths, 'count': count, 'user_id': user_id}
     return matrix, paths
 
 
-def _search_numpy(conn, text_emb, limit, threshold, vis_sql, vis_params, user_id):
-    """Fallback: brute-force cosine similarity search via NumPy."""
-    matrix, paths = _load_embedding_matrix(conn, vis_sql, vis_params, user_id)
+async def _search_numpy(conn, text_emb, limit, threshold, vis_sql, vis_params, user_id):
+    """Fallback: brute-force cosine similarity search via NumPy (async)."""
+    matrix, paths = await _load_embedding_matrix(conn, vis_sql, vis_params, user_id)
     if matrix is None or len(paths) == 0:
         return {}
 
     if text_emb.shape[0] != matrix.shape[1]:
         return {}
 
-    similarities = matrix @ text_emb
-    mask = similarities >= threshold
-    if not mask.any():
-        return {}
+    # Matmul is CPU-bound; offload from event loop.
+    def _compute():
+        similarities = matrix @ text_emb
+        mask = similarities >= threshold
+        if not mask.any():
+            return {}
+        indices = np.where(mask)[0]
+        top_indices = indices[np.argsort(-similarities[indices])[:limit]]
+        return {paths[i]: float(similarities[i]) for i in top_indices}
 
-    indices = np.where(mask)[0]
-    top_indices = indices[np.argsort(-similarities[indices])[:limit]]
-    return {paths[i]: float(similarities[i]) for i in top_indices}
+    return await asyncio.to_thread(_compute)
 
 
 _fts_available = None
 _fts_checked_at = 0.0
 
 
-def _has_fts(conn):
+async def _has_fts(conn):
     """Check if the photos_fts table exists (TTL cached, 5 min)."""
     import time
     global _fts_available, _fts_checked_at
@@ -251,9 +272,11 @@ def _has_fts(conn):
     if _fts_available is not None and (now - _fts_checked_at) < 300:
         return _fts_available
     try:
-        row = conn.execute(
+        cur = await conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='photos_fts'"
-        ).fetchone()
+        )
+        row = await cur.fetchone()
+        await cur.close()
         _fts_available = row is not None
     except sqlite3.OperationalError:
         _fts_available = False
@@ -261,18 +284,20 @@ def _has_fts(conn):
     return _fts_available
 
 
-def _fts_search(conn, query, limit):
-    """Run FTS5 search and return {path: normalized_score} dict.
+async def _fts_search(conn, query, limit):
+    """Run FTS5 search and return {path: normalized_score} dict (async).
 
     BM25 rank values are negative (lower = better match).
     Scores are normalized to 0..1 range relative to the best match.
     """
     try:
-        rows = conn.execute(
+        cur = await conn.execute(
             "SELECT path, rank FROM photos_fts WHERE photos_fts MATCH ? "
             "ORDER BY rank LIMIT ?",
             (query, limit)
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
+        await cur.close()
     except sqlite3.OperationalError:
         return {}
 
@@ -294,22 +319,29 @@ def _fts_search(conn, query, limit):
 
 
 @router.get("/api/search")
-def api_search(
+async def api_search(
     request: Request,
     q: str = Query(..., min_length=1, max_length=500),
     limit: int = Query(50, ge=1, le=200),
     threshold: float = Query(0.15, ge=0.0, le=1.0),
     user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
-    """Semantic text-to-image search using CLIP/SigLIP cosine similarity."""
+    """Semantic text-to-image search using CLIP/SigLIP cosine similarity (async).
+
+    Text encoding (`_encode_text`) is a synchronous GPU/CPU call; we run it in
+    a worker thread so it never blocks the event loop. All DB I/O uses
+    aiosqlite via get_async_db().
+    """
     if not VIEWER_CONFIG.get('features', {}).get('show_semantic_search', True):
         return {'photos': [], 'total': 0, 'query': q, 'error': 'Semantic search is disabled'}
 
-    with get_db() as conn:
-        try:
+    try:
+        async with get_async_db() as conn:
             user_id = user.user_id if user else None
             vis_sql, vis_params = get_visibility_clause(user_id)
-            existing_cols = get_existing_columns(conn)
+            # get_existing_columns() reads the lifespan-warmed cache, never
+            # touches conn after the first hit — safe with aiosqlite.
+            existing_cols = get_existing_columns(conn=None)
             from_clause, from_params = get_photos_from_clause(user_id)
             pref_cols = get_preference_columns(user_id)
             pref_col_names = {'star_rating', 'is_favorite', 'is_rejected'}
@@ -321,20 +353,22 @@ def api_search(
                     else:
                         select_cols.append(c)
 
-            embedding_scores = {}
-            fts_scores = {}
+            embedding_scores: dict[str, float] = {}
+            fts_scores: dict[str, float] = {}
 
             # --- FTS5 text search ---
-            if _has_fts(conn):
-                fts_scores = _fts_search(conn, q, limit)
+            if await _has_fts(conn):
+                fts_scores = await _fts_search(conn, q, limit)
 
             # --- Embedding-based search ---
-            text_emb = _encode_text(q)
+            # Text encoding is GPU/CPU work — push to a worker thread so the
+            # event loop stays responsive during the typically 5-30ms encode.
+            text_emb = await asyncio.to_thread(_encode_text, q)
 
-            if _check_vec_available(conn):
-                embedding_scores = _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params)
+            if await _check_vec_available(conn):
+                embedding_scores = await _search_vec(conn, text_emb, limit, threshold, vis_sql, vis_params)
             else:
-                embedding_scores = _search_numpy(conn, text_emb, limit, threshold, vis_sql, vis_params, user_id)
+                embedding_scores = await _search_numpy(conn, text_emb, limit, threshold, vis_sql, vis_params, user_id)
 
             # --- Merge results ---
             # Embedding weight 0.7, FTS weight 0.3
@@ -356,11 +390,13 @@ def api_search(
             # Fetch full photo data for all matching paths
             matching_paths = list(sim_by_path.keys())
             placeholders = ','.join(['?'] * len(matching_paths))
-            rows = conn.execute(
+            cur = await conn.execute(
                 f"SELECT {', '.join(select_cols)} FROM {from_clause} "
                 f"WHERE photos.path IN ({placeholders})",
                 from_params + matching_paths
-            ).fetchall()
+            )
+            rows = await cur.fetchall()
+            await cur.close()
 
             tags_limit = VIEWER_CONFIG['display']['tags_per_photo']
             photos = split_photo_tags(rows, tags_limit)
@@ -368,7 +404,7 @@ def api_search(
                 photo['date_formatted'] = format_date(photo.get('date_taken'))
                 photo['similarity'] = round(sim_by_path.get(photo['path'], 0), 4)
 
-            attach_person_data(photos, conn)
+            await attach_person_data_async(photos, conn)
 
             # Sort by similarity (descending)
             photos.sort(key=lambda p: p.get('similarity', 0), reverse=True)
@@ -381,6 +417,6 @@ def api_search(
                 'query': q,
             }
 
-        except Exception:
-            logger.exception("Semantic search failed for query: %s", q)
-            return {'photos': [], 'total': 0, 'query': q, 'error': 'Search failed'}
+    except Exception:
+        logger.exception("Semantic search failed for query: %s", q)
+        return {'photos': [], 'total': 0, 'query': q, 'error': 'Search failed'}

@@ -1,6 +1,6 @@
 """Tests for the semantic search endpoint (api/routers/search.py)."""
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from unittest import mock
 
 import numpy as np
@@ -10,11 +10,38 @@ from fastapi.testclient import TestClient
 from api import create_app
 
 
-def _cm(conn):
-    @contextmanager
-    def _ctx():
+def _async_cm(conn):
+    """Async context-manager factory; passes the mock conn through."""
+    @asynccontextmanager
+    async def _ctx():
         yield conn
-    return _ctx()
+    return _ctx
+
+
+def _async_return(value):
+    """Wrap a value in a coroutine for return-value mocking of async helpers."""
+    async def _f(*args, **kwargs):
+        return value
+    return _f
+
+
+def _make_async_conn_select_rows(rows):
+    """A minimal async conn that always returns `rows` from any execute()."""
+    class _Cursor:
+        async def fetchall(self):
+            return rows
+
+        async def fetchone(self):
+            return rows[0] if rows else None
+
+        async def close(self):
+            pass
+
+    class _Conn:
+        async def execute(self, *a, **kw):
+            return _Cursor()
+
+    return _Conn()
 
 
 @pytest.fixture()
@@ -44,19 +71,22 @@ class TestSearch:
 
     def test_no_embeddings(self, client):
         """When _load_embedding_matrix returns (None, []), returns empty photos."""
-        mock_conn = mock.MagicMock()
+        async_conn = _make_async_conn_select_rows([])
 
         with (
             mock.patch("api.routers.search.VIEWER_CONFIG", {
                 "features": {"show_semantic_search": True},
                 "display": {"tags_per_photo": 3},
             }),
-            mock.patch("api.routers.search.get_db", lambda: _cm(mock_conn)),
+            mock.patch("api.routers.search.get_async_db", _async_cm(async_conn)),
             mock.patch("api.routers.search.get_visibility_clause", return_value=("1=1", [])),
             mock.patch("api.routers.search.get_existing_columns", return_value={"path", "aggregate"}),
             mock.patch("api.routers.search.get_photos_from_clause", return_value=("photos", [])),
             mock.patch("api.routers.search.get_preference_columns", return_value={}),
-            mock.patch("api.routers.search._load_embedding_matrix", return_value=(None, [])),
+            mock.patch("api.routers.search._load_embedding_matrix", _async_return((None, []))),
+            mock.patch("api.routers.search._has_fts", _async_return(False)),
+            mock.patch("api.routers.search._check_vec_available", _async_return(False)),
+            mock.patch("api.routers.search._encode_text", return_value=np.array([1.0, 0.0], dtype=np.float32)),
         ):
             resp = client.get("/api/search", params={"q": "mountains"})
 
@@ -68,41 +98,40 @@ class TestSearch:
 
     def test_successful_search(self, client):
         """Mock matrix with 3 embeddings, text_emb that matches 2 above threshold."""
-        # 3 photo embeddings (4-dim for simplicity)
         matrix = np.array([
-            [1.0, 0.0, 0.0, 0.0],   # photo a
-            [0.0, 1.0, 0.0, 0.0],   # photo b
-            [0.9, 0.1, 0.0, 0.0],   # photo c - similar to a
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.9, 0.1, 0.0, 0.0],
         ], dtype=np.float32)
         paths = ["/photos/a.jpg", "/photos/b.jpg", "/photos/c.jpg"]
-
-        # text_emb aligned with photo a and c (cosine sim > 0.15 threshold)
         text_emb = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
-        mock_conn = mock.MagicMock()
-        # DB returns photo rows for matching paths
-        mock_conn.execute.return_value.fetchall.return_value = [
+        # The fetch of full photo rows for matching paths happens last.
+        async_conn = _make_async_conn_select_rows([
             {"path": "/photos/a.jpg", "filename": "a.jpg", "tags": "sunset,sky",
              "date_taken": "2024:06:15 18:30:00", "aggregate": 8.5},
             {"path": "/photos/c.jpg", "filename": "c.jpg", "tags": "dawn",
              "date_taken": "2024:07:01 06:00:00", "aggregate": 7.2},
-        ]
+        ])
+
+        async def _no_op_attach(*args, **kwargs):
+            return None
 
         with (
             mock.patch("api.routers.search.VIEWER_CONFIG", {
                 "features": {"show_semantic_search": True},
                 "display": {"tags_per_photo": 3},
             }),
-            mock.patch("api.routers.search.get_db", lambda: _cm(mock_conn)),
+            mock.patch("api.routers.search.get_async_db", _async_cm(async_conn)),
             mock.patch("api.routers.search.get_visibility_clause", return_value=("1=1", [])),
             mock.patch("api.routers.search.get_existing_columns", return_value={"path", "aggregate"}),
             mock.patch("api.routers.search.get_photos_from_clause", return_value=("photos", [])),
             mock.patch("api.routers.search.get_preference_columns", return_value={}),
-            mock.patch("api.routers.search._load_embedding_matrix", return_value=(matrix, paths)),
+            mock.patch("api.routers.search._load_embedding_matrix", _async_return((matrix, paths))),
             mock.patch("api.routers.search._encode_text", return_value=text_emb),
-            mock.patch("api.routers.search._has_fts", return_value=False),
-            mock.patch("api.routers.search._check_vec_available", return_value=False),
-            mock.patch("api.routers.search.attach_person_data"),
+            mock.patch("api.routers.search._has_fts", _async_return(False)),
+            mock.patch("api.routers.search._check_vec_available", _async_return(False)),
+            mock.patch("api.routers.search.attach_person_data_async", _no_op_attach),
             mock.patch("api.routers.search.sanitize_float_values"),
         ):
             resp = client.get("/api/search", params={"q": "sunset", "threshold": 0.15})
@@ -111,41 +140,38 @@ class TestSearch:
         body = resp.json()
         assert body["total"] == 2
         assert len(body["photos"]) == 2
-        # Photos should have similarity scores
         for photo in body["photos"]:
             assert "similarity" in photo
             assert photo["similarity"] > 0
-        # Sorted by similarity descending: a (1.0) before c (0.9)
         assert body["photos"][0]["path"] == "/photos/a.jpg"
         assert body["photos"][1]["path"] == "/photos/c.jpg"
 
 
     def test_dimension_mismatch(self, client):
         """When text_emb dimension != matrix columns, returns empty."""
-        # Matrix is 3x4 but text_emb will be 5-dim
         matrix = np.array([
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
             [0.5, 0.5, 0.0, 0.0],
         ], dtype=np.float32)
         paths = ["/photos/a.jpg", "/photos/b.jpg", "/photos/c.jpg"]
-
         text_emb = np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)  # wrong dim
-
-        mock_conn = mock.MagicMock()
+        async_conn = _make_async_conn_select_rows([])
 
         with (
             mock.patch("api.routers.search.VIEWER_CONFIG", {
                 "features": {"show_semantic_search": True},
                 "display": {"tags_per_photo": 3},
             }),
-            mock.patch("api.routers.search.get_db", lambda: _cm(mock_conn)),
+            mock.patch("api.routers.search.get_async_db", _async_cm(async_conn)),
             mock.patch("api.routers.search.get_visibility_clause", return_value=("1=1", [])),
             mock.patch("api.routers.search.get_existing_columns", return_value={"path", "aggregate"}),
             mock.patch("api.routers.search.get_photos_from_clause", return_value=("photos", [])),
             mock.patch("api.routers.search.get_preference_columns", return_value={}),
-            mock.patch("api.routers.search._load_embedding_matrix", return_value=(matrix, paths)),
+            mock.patch("api.routers.search._load_embedding_matrix", _async_return((matrix, paths))),
             mock.patch("api.routers.search._encode_text", return_value=text_emb),
+            mock.patch("api.routers.search._has_fts", _async_return(False)),
+            mock.patch("api.routers.search._check_vec_available", _async_return(False)),
         ):
             resp = client.get("/api/search", params={"q": "sunset"})
 
@@ -157,29 +183,28 @@ class TestSearch:
 
     def test_no_results_above_threshold(self, client):
         """When all similarities are below threshold, returns empty."""
-        # Orthogonal vectors: cosine similarity = 0
         matrix = np.array([
             [0.0, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.0],
         ], dtype=np.float32)
         paths = ["/photos/a.jpg", "/photos/b.jpg"]
-
         text_emb = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
-
-        mock_conn = mock.MagicMock()
+        async_conn = _make_async_conn_select_rows([])
 
         with (
             mock.patch("api.routers.search.VIEWER_CONFIG", {
                 "features": {"show_semantic_search": True},
                 "display": {"tags_per_photo": 3},
             }),
-            mock.patch("api.routers.search.get_db", lambda: _cm(mock_conn)),
+            mock.patch("api.routers.search.get_async_db", _async_cm(async_conn)),
             mock.patch("api.routers.search.get_visibility_clause", return_value=("1=1", [])),
             mock.patch("api.routers.search.get_existing_columns", return_value={"path", "aggregate"}),
             mock.patch("api.routers.search.get_photos_from_clause", return_value=("photos", [])),
             mock.patch("api.routers.search.get_preference_columns", return_value={}),
-            mock.patch("api.routers.search._load_embedding_matrix", return_value=(matrix, paths)),
+            mock.patch("api.routers.search._load_embedding_matrix", _async_return((matrix, paths))),
             mock.patch("api.routers.search._encode_text", return_value=text_emb),
+            mock.patch("api.routers.search._has_fts", _async_return(False)),
+            mock.patch("api.routers.search._check_vec_available", _async_return(False)),
         ):
             resp = client.get("/api/search", params={"q": "sunset", "threshold": 0.15})
 
@@ -193,21 +218,22 @@ class TestSearch:
         """When _encode_text raises, returns error dict not 500."""
         matrix = np.array([[1.0, 0.0]], dtype=np.float32)
         paths = ["/photos/a.jpg"]
-
-        mock_conn = mock.MagicMock()
+        async_conn = _make_async_conn_select_rows([])
 
         with (
             mock.patch("api.routers.search.VIEWER_CONFIG", {
                 "features": {"show_semantic_search": True},
                 "display": {"tags_per_photo": 3},
             }),
-            mock.patch("api.routers.search.get_db", lambda: _cm(mock_conn)),
+            mock.patch("api.routers.search.get_async_db", _async_cm(async_conn)),
             mock.patch("api.routers.search.get_visibility_clause", return_value=("1=1", [])),
             mock.patch("api.routers.search.get_existing_columns", return_value={"path", "aggregate"}),
             mock.patch("api.routers.search.get_photos_from_clause", return_value=("photos", [])),
             mock.patch("api.routers.search.get_preference_columns", return_value={}),
-            mock.patch("api.routers.search._load_embedding_matrix", return_value=(matrix, paths)),
+            mock.patch("api.routers.search._load_embedding_matrix", _async_return((matrix, paths))),
             mock.patch("api.routers.search._encode_text", side_effect=RuntimeError("GPU OOM")),
+            mock.patch("api.routers.search._has_fts", _async_return(False)),
+            mock.patch("api.routers.search._check_vec_available", _async_return(False)),
         ):
             resp = client.get("/api/search", params={"q": "sunset"})
 
