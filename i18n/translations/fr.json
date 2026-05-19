@@ -251,7 +251,15 @@
     "error_assigning_faces": "Erreur lors de l'assignation des visages",
     "rename_person": "Renommer la personne",
     "confirm_remove_person": "Retirer cette personne de cette photo ?",
-    "remove_person_title": "Retirer la personne de cette photo"
+    "remove_person_title": "Retirer la personne de cette photo",
+    "new_person": "Nouvelle personne",
+    "needs_naming": "À nommer",
+    "needs_naming_help": "Personnes groupées automatiquement avec beaucoup de visages — nommez-les ici",
+    "new_person_dialog": {
+      "title": "Créer une nouvelle personne",
+      "name_placeholder": "Nom de la personne",
+      "save": "Créer"
+    }
   },
   "compare": {
     "title": "Comparer les photos",
@@ -994,6 +1002,10 @@
     "error": "Echec de la connexion"
   },
   "gallery": {
+    "hidden_banner": {
+      "message": "{n} photos masquées par les filtres actuels",
+      "show_all": "Tout afficher"
+    },
     "all_photos": "Toutes les photos",
     "sort": "Trier par",
     "sort_aggregate": "Agregat",
@@ -1024,7 +1036,12 @@
     "face_quality_range": "Plage qualite visage",
     "composition_range": "Plage composition",
     "hide_details": "Masquer details",
-    "hide_tooltip": "Masquer l'infobulle",
+    "tooltip_mode": {
+      "label": "Infobulle",
+      "hover": "Survol",
+      "click": "Clic",
+      "off": "Désactivée"
+    },
     "hide_blinks": "Masquer clignements",
     "hide_bursts": "Meilleure de la rafale",
     "hide_duplicates": "Masquer doublons",
@@ -1384,7 +1401,12 @@
     "generate_link": "Générer un lien",
     "invalid_share_link": "Lien de partage invalide",
     "share_link_error": "Ce lien de partage est invalide.",
-    "load_error": "Impossible de charger la personne."
+    "load_error": "Impossible de charger la personne.",
+    "created": "Personne créée",
+    "create_error": "Impossible de créer la personne"
+  },
+  "person_selector": {
+    "create_new": "Créer une nouvelle personne"
   },
   "slideshow": {
     "start": "Diaporama",
@@ -1571,7 +1593,15 @@
     "threshold": "Similarité",
     "load_more": "Charger plus",
     "view_detail": "Voir le détail",
-    "cancel_pass": "Annuler"
+    "cancel_pass": "Annuler",
+    "lightbox": {
+      "navigate": "Naviguer",
+      "keep": "Garder",
+      "reject": "Rejeter",
+      "kept": "Gardée",
+      "rejected": "Rejetée",
+      "undecided": "Indécise"
+    }
   },
   "memories": {
     "title": "Ce jour-là",

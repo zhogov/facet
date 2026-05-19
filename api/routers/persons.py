@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.auth import CurrentUser, require_edition, require_authenticated
+from api.config import VIEWER_CONFIG
 from api.database import get_db
+from api.db_helpers import update_person_face_count
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,15 @@ class MergeBatchRequest(BaseModel):
 
 class DeleteBatchRequest(BaseModel):
     person_ids: List[int]
+
+
+class CreatePersonRequest(BaseModel):
+    name: str
+    face_ids: List[int] = []
+
+
+class AssignFacesRequest(BaseModel):
+    face_ids: List[int]
 
 
 # --- Endpoints ---
@@ -264,5 +275,164 @@ def delete_persons_batch(
             return {"success": True, "deleted_count": len(body.person_ids)}
         except sqlite3.Error:
             logger.exception("Database error in batch delete persons")
+            conn.rollback()
+            raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@router.get("/api/persons/needs_naming")
+def api_persons_needs_naming(
+    min_faces: int = Query(0, ge=0),
+    user: CurrentUser = Depends(require_authenticated),
+):
+    """List unnamed auto-clustered persons with face_count >= min_faces (default from config)."""
+    if not min_faces:
+        try:
+            min_faces = int(VIEWER_CONFIG.get('persons', {}).get('needs_naming_min_faces', 5))
+        except (TypeError, ValueError):
+            min_faces = 5
+
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT p.id, p.name, p.representative_face_id, p.face_count,
+                   CASE WHEN p.face_thumbnail IS NOT NULL THEN 1 ELSE 0 END as face_thumbnail
+            FROM persons p
+            WHERE p.name IS NULL AND p.auto_clustered = 1 AND p.face_count >= ?
+            ORDER BY p.face_count DESC, p.id
+        """, (min_faces,)).fetchall()
+
+    return {
+        "persons": [dict(r) for r in rows],
+        "min_faces": min_faces,
+        "total": len(rows),
+    }
+
+
+@router.post("/api/persons")
+def api_create_person(
+    body: CreatePersonRequest,
+    user: CurrentUser = Depends(require_edition),
+):
+    """Create a new person, optionally assigning a set of existing faces to them."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    with get_db() as conn:
+        try:
+            cursor = conn.execute(
+                "INSERT INTO persons (name, auto_clustered, face_count) VALUES (?, 0, 0)",
+                (name,),
+            )
+            person_id = cursor.lastrowid
+
+            old_person_ids: set[int] = set()
+            assigned_count = 0
+            if body.face_ids:
+                placeholders = ",".join("?" * len(body.face_ids))
+                existing = conn.execute(
+                    f"SELECT id, person_id FROM faces WHERE id IN ({placeholders})",
+                    body.face_ids,
+                ).fetchall()
+                if len(existing) != len(body.face_ids):
+                    raise HTTPException(status_code=404, detail="One or more face_ids not found")
+
+                for row in existing:
+                    if row["person_id"] is not None and row["person_id"] != person_id:
+                        old_person_ids.add(row["person_id"])
+
+                conn.execute(
+                    f"UPDATE faces SET person_id = ? WHERE id IN ({placeholders})",
+                    [person_id] + list(body.face_ids),
+                )
+                assigned_count = len(body.face_ids)
+
+                update_person_face_count(conn, person_id)
+                for old_id in old_person_ids:
+                    update_person_face_count(conn, old_id)
+                    row = conn.execute(
+                        "SELECT face_count FROM persons WHERE id = ?", (old_id,)
+                    ).fetchone()
+                    if row and row[0] == 0:
+                        conn.execute("DELETE FROM persons WHERE id = ?", (old_id,))
+
+            row = conn.execute(
+                "SELECT face_count FROM persons WHERE id = ?", (person_id,)
+            ).fetchone()
+            face_count = row[0] if row else assigned_count
+
+            conn.commit()
+            return {"id": person_id, "name": name, "face_count": face_count}
+        except HTTPException:
+            raise
+        except sqlite3.Error:
+            logger.exception("Database error creating person '%s'", name)
+            conn.rollback()
+            raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@router.post("/api/persons/{person_id}/assign_faces")
+def api_assign_faces_batch(
+    person_id: int,
+    body: AssignFacesRequest,
+    user: CurrentUser = Depends(require_edition),
+):
+    """Bulk-assign a set of faces to a person. Empties old persons are auto-deleted."""
+    if not body.face_ids:
+        raise HTTPException(status_code=400, detail="face_ids is required")
+
+    with get_db() as conn:
+        try:
+            target = conn.execute(
+                "SELECT id FROM persons WHERE id = ?", (person_id,)
+            ).fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="Target person not found")
+
+            placeholders = ",".join("?" * len(body.face_ids))
+            existing = conn.execute(
+                f"SELECT id, person_id FROM faces WHERE id IN ({placeholders})",
+                body.face_ids,
+            ).fetchall()
+            if len(existing) != len(body.face_ids):
+                raise HTTPException(status_code=404, detail="One or more face_ids not found")
+
+            old_person_ids: set[int] = set()
+            for row in existing:
+                if row["person_id"] is not None and row["person_id"] != person_id:
+                    old_person_ids.add(row["person_id"])
+
+            conn.execute(
+                f"UPDATE faces SET person_id = ? WHERE id IN ({placeholders})",
+                [person_id] + list(body.face_ids),
+            )
+
+            update_person_face_count(conn, person_id)
+            deleted_persons: list[int] = []
+            for old_id in old_person_ids:
+                update_person_face_count(conn, old_id)
+                row = conn.execute(
+                    "SELECT face_count FROM persons WHERE id = ?", (old_id,)
+                ).fetchone()
+                if row and row[0] == 0:
+                    conn.execute("DELETE FROM persons WHERE id = ?", (old_id,))
+                    deleted_persons.append(old_id)
+
+            row = conn.execute(
+                "SELECT face_count FROM persons WHERE id = ?", (person_id,)
+            ).fetchone()
+            face_count = row[0] if row else 0
+
+            conn.commit()
+            return {
+                "success": True,
+                "person_id": person_id,
+                "assigned_count": len(body.face_ids),
+                "face_count": face_count,
+                "deleted_persons": deleted_persons,
+            }
+        except HTTPException:
+            raise
+        except sqlite3.Error:
+            logger.exception("Database error assigning faces to person %d", person_id)
             conn.rollback()
             raise HTTPException(status_code=500, detail='Internal server error')

@@ -66,6 +66,42 @@ import { InfiniteScrollDirective } from '../../shared/directives/infinite-scroll
 
       <!-- Main content -->
       <mat-sidenav-content>
+        <!-- Display toolbar -->
+        <div class="flex items-center gap-2 px-2 md:px-4 pt-2 md:pt-4">
+          <button mat-icon-button
+                  [matTooltip]="'gallery.tooltip_mode.label' | translate"
+                  [matMenuTriggerFor]="tooltipMenu">
+            <mat-icon>{{ tooltipModeIcon() }}</mat-icon>
+          </button>
+          <mat-menu #tooltipMenu="matMenu">
+            <button mat-menu-item (click)="setTooltipMode('hover')">
+              <mat-icon>highlight_alt</mat-icon>
+              {{ 'gallery.tooltip_mode.hover' | translate }}
+            </button>
+            <button mat-menu-item (click)="setTooltipMode('click')">
+              <mat-icon>touch_app</mat-icon>
+              {{ 'gallery.tooltip_mode.click' | translate }}
+            </button>
+            <button mat-menu-item (click)="setTooltipMode('off')">
+              <mat-icon>visibility_off</mat-icon>
+              {{ 'gallery.tooltip_mode.off' | translate }}
+            </button>
+          </mat-menu>
+        </div>
+
+        <!-- Hidden-photos banner -->
+        @if (showHiddenBanner()) {
+          <div class="mx-2 md:mx-4 mt-2 md:mt-4 px-3 py-2 rounded-md bg-[var(--mat-sys-surface-container-high)] border border-[var(--mat-sys-outline-variant)] flex items-center gap-3 text-sm">
+            <mat-icon class="opacity-70 !text-base !w-5 !h-5">visibility_off</mat-icon>
+            <span class="flex-1">
+              {{ 'gallery.hidden_banner.message' | translate:{ n: store.hiddenSummary().total } }}
+            </span>
+            <button mat-button class="!min-w-0" (click)="showAllHidden()">
+              {{ 'gallery.hidden_banner.show_all' | translate }}
+            </button>
+          </div>
+        }
+
         <!-- Photo grid / mosaic -->
         @if (store.photos().length) {
           @if (effectiveGalleryMode() === 'grid') {
@@ -85,6 +121,7 @@ import { InfiniteScrollDirective } from '../../shared/directives/infinite-scroll
                   [thumbSize]="thumbSize()"
                   [isEditionMode]="auth.isEdition()"
                   [personFilterId]="store.filters().person_id"
+                  [tooltipMode]="tooltipMode()"
                   (selectionChange)="toggleSelection($event.photo, $event.event)"
                   (tooltipShow)="showTooltip($event.event, $event.photo)"
                   (tooltipHide)="hideTooltip()"
@@ -118,6 +155,7 @@ import { InfiniteScrollDirective } from '../../shared/directives/infinite-scroll
                       [thumbSize]="thumbSize()"
                       [isEditionMode]="auth.isEdition()"
                       [personFilterId]="store.filters().person_id"
+                      [tooltipMode]="tooltipMode()"
                       (selectionChange)="toggleSelection($event.photo, $event.event)"
                       (tooltipShow)="showTooltip($event.event, $event.photo)"
                       (tooltipHide)="hideTooltip()"
@@ -174,7 +212,7 @@ import { InfiniteScrollDirective } from '../../shared/directives/infinite-scroll
     }
 
     <!-- Photo details tooltip (single instance, repositioned on hover, hidden on small/touch devices) -->
-    @if (!isTouchDevice() && isDesktop() && !effectiveHideTooltip()) {
+    @if (!isTouchDevice() && isDesktop() && !tooltipDisabled()) {
       <app-photo-tooltip
         [photo]="tooltipPhoto()"
         [x]="tooltipX()"
@@ -303,8 +341,39 @@ export class GalleryComponent implements OnInit, OnDestroy {
   /** Whether to hide photo details below the thumbnails */
   readonly effectiveHideDetails = computed(() => this.store.filters().hide_details);
 
-  /** Cached hide_tooltip signal — avoids re-reading store.filters() per card in @for */
-  readonly effectiveHideTooltip = computed(() => this.store.filters().hide_tooltip);
+  /** Tooltip mode signal — 'hover' | 'click' | 'off' */
+  readonly tooltipMode = computed(() => this.store.filters().tooltip_mode);
+  /** Whether tooltip is fully disabled (off mode) — used for skipping rendering and hover handlers */
+  readonly tooltipDisabled = computed(() => this.tooltipMode() === 'off');
+
+  /** Show the hidden-photos banner when filters are hiding rows and at least one is on. */
+  readonly showHiddenBanner = computed(() => {
+    const f = this.store.filters();
+    return this.store.hiddenSummary().total > 0
+      && (f.hide_blinks || f.hide_bursts || f.hide_duplicates);
+  });
+
+  showAllHidden(): void {
+    void this.store.updateFilters({
+      hide_blinks: false,
+      hide_bursts: false,
+      hide_duplicates: false,
+    });
+  }
+
+  /** Icon for the tooltip-mode toolbar button — reflects current mode. */
+  readonly tooltipModeIcon = computed(() => {
+    switch (this.tooltipMode()) {
+      case 'click': return 'touch_app';
+      case 'off': return 'visibility_off';
+      default: return 'info';
+    }
+  });
+
+  setTooltipMode(mode: 'hover' | 'click' | 'off'): void {
+    void this.store.updateFilter('tooltip_mode', mode);
+    if (mode !== 'hover') this.hideTooltip();
+  }
 
   /** Container width for mosaic layout (updated via ResizeObserver) */
   protected readonly containerWidth = signal(0);
@@ -533,7 +602,12 @@ export class GalleryComponent implements OnInit, OnDestroy {
   }
 
   showTooltip(event: MouseEvent, photo: Photo): void {
-    if (this.isTouchDevice() || this.effectiveHideTooltip()) return;
+    if (this.isTouchDevice() || this.tooltipMode() === 'off') return;
+    // In click mode, toggle: clicking the same photo hides the tooltip.
+    if (this.tooltipMode() === 'click' && this.tooltipPhoto() === photo) {
+      this.hideTooltip();
+      return;
+    }
     const card = (event.currentTarget as HTMLElement)?.closest('.relative.rounded-lg') as HTMLElement ?? event.currentTarget as HTMLElement;
     const rect = card.getBoundingClientRect();
     const padding = 16;

@@ -8,12 +8,20 @@ import { Photo } from '../../shared/models/photo.model';
 
 // --- API response types ---
 
+export interface HiddenSummary {
+  total: number;
+  blinks: number;
+  bursts: number;
+  duplicates: number;
+}
+
 export interface PhotosResponse {
   photos: Photo[];
   total: number;
   page: number;
   per_page: number;
   has_more: boolean;
+  hidden_summary?: HiddenSummary;
 }
 
 export interface TypeCount {
@@ -48,7 +56,7 @@ export interface ViewerConfig {
     hide_bursts: boolean;
     hide_duplicates: boolean;
     hide_details: boolean;
-    hide_tooltip: boolean;
+    tooltip_mode: TooltipMode;
     hide_rejected: boolean;
     gallery_mode: GalleryMode;
   };
@@ -199,7 +207,7 @@ export interface GalleryFilters {
   gps_radius_km: string;
   // Display
   hide_details: boolean;
-  hide_tooltip: boolean;
+  tooltip_mode: TooltipMode;
   hide_blinks: boolean;
   hide_bursts: boolean;
   hide_duplicates: boolean;
@@ -213,7 +221,7 @@ export interface GalleryFilters {
 export const SMART_ALBUM_EXCLUDE_KEYS = new Set([
   'page', 'per_page', 'semanticQuery', 'album_id',
   'similarity_mode', 'min_similarity',
-  'hide_details', 'hide_tooltip', 'hide_blinks', 'hide_bursts',
+  'hide_details', 'tooltip_mode', 'hide_blinks', 'hide_bursts',
   'hide_duplicates', 'hide_rejected',
   'gps_lat', 'gps_lng', 'gps_radius_km',
 ]);
@@ -336,7 +344,7 @@ export const DEFAULT_FILTERS: GalleryFilters = {
   similarity_mode: 'visual',
   min_similarity: '70',
   hide_details: true,
-  hide_tooltip: false,
+  tooltip_mode: 'hover',
   hide_blinks: true,
   hide_bursts: true,
   hide_duplicates: true,
@@ -347,16 +355,17 @@ export const DEFAULT_FILTERS: GalleryFilters = {
 };
 
 export type GalleryMode = 'grid' | 'mosaic';
+export type TooltipMode = 'hover' | 'click' | 'off';
 const GALLERY_MODE_KEY = 'facet_gallery_mode';
 
 const DRAWER_STATE_KEY = 'facet_filter_drawer_open';
 const DISPLAY_OPTIONS_KEY = 'facet_display_options';
 const CARD_WIDTH_KEY = 'facet_card_width';
 type DisplayOptions = Pick<GalleryFilters,
-  'hide_details' | 'hide_tooltip' | 'hide_blinks' | 'hide_bursts' | 'hide_duplicates' |
+  'hide_details' | 'tooltip_mode' | 'hide_blinks' | 'hide_bursts' | 'hide_duplicates' |
   'hide_rejected' | 'favorites_only' | 'is_monochrome'>;
 const DISPLAY_OPTION_KEYS: (keyof DisplayOptions)[] = [
-  'hide_details', 'hide_tooltip', 'hide_blinks', 'hide_bursts', 'hide_duplicates',
+  'hide_details', 'tooltip_mode', 'hide_blinks', 'hide_bursts', 'hide_duplicates',
   'hide_rejected', 'favorites_only', 'is_monochrome',
 ];
 
@@ -401,6 +410,9 @@ export class GalleryStore {
   readonly slideshowActive = signal(false);
   readonly cardWidth = signal(parseInt(localStorage.getItem(CARD_WIDTH_KEY) ?? '', 10) || 0);
   readonly galleryMode = signal<GalleryMode>((localStorage.getItem(GALLERY_MODE_KEY) as GalleryMode) || 'grid');
+
+  // Hidden-photo summary (populated from /photos response)
+  readonly hiddenSummary = signal<HiddenSummary>({ total: 0, blinks: 0, bursts: 0, duplicates: 0 });
 
   // Filter options
   readonly types = signal<TypeCount[]>([]);
@@ -498,7 +510,7 @@ export class GalleryStore {
         sort_direction: defaults?.sort_direction ?? 'DESC',
         type: defaults?.type ?? '',
         hide_details: storedDisplay.hide_details ?? (defaults?.hide_details ?? true),
-        hide_tooltip: storedDisplay.hide_tooltip ?? (defaults?.hide_tooltip ?? false),
+        tooltip_mode: storedDisplay.tooltip_mode ?? (defaults?.tooltip_mode ?? 'hover'),
         hide_blinks: storedDisplay.hide_blinks ?? (defaults?.hide_blinks ?? true),
         hide_bursts: storedDisplay.hide_bursts ?? (defaults?.hide_bursts ?? true),
         hide_duplicates: storedDisplay.hide_duplicates ?? (defaults?.hide_duplicates ?? true),
@@ -561,6 +573,9 @@ export class GalleryStore {
       this.photos.set(res.photos);
       this.total.set(res.total);
       this.hasMore.set(res.has_more);
+      this.hiddenSummary.set(
+        res.hidden_summary ?? { total: 0, blinks: 0, bursts: 0, duplicates: 0 },
+      );
     } catch {
       if (seq !== this._loadSeq) return;
       // Network error — restore previous state
@@ -597,6 +612,9 @@ export class GalleryStore {
         this.photos.update(current => [...current, ...res.photos]);
         this.total.set(res.total);
         this.hasMore.set(res.has_more);
+        if (res.hidden_summary) {
+          this.hiddenSummary.set(res.hidden_summary);
+        }
       }
     } catch {
       if (seq !== this._loadSeq) return;
@@ -611,7 +629,7 @@ export class GalleryStore {
 
   /** Display-only keys that never affect the API query */
   private static readonly DISPLAY_ONLY_KEYS: ReadonlySet<keyof GalleryFilters> = new Set([
-    'hide_details', 'hide_tooltip',
+    'hide_details', 'tooltip_mode',
   ]);
 
   /** Update a single filter and reload photos from page 1 */
@@ -661,7 +679,7 @@ export class GalleryStore {
       sort: defaults?.sort ?? 'aggregate',
       sort_direction: defaults?.sort_direction ?? 'DESC',
       hide_details: defaults?.hide_details ?? true,
-      hide_tooltip: defaults?.hide_tooltip ?? false,
+      tooltip_mode: defaults?.tooltip_mode ?? 'hover',
       hide_blinks: defaults?.hide_blinks ?? true,
       hide_bursts: defaults?.hide_bursts ?? true,
       hide_duplicates: defaults?.hide_duplicates ?? true,
@@ -818,6 +836,40 @@ export class GalleryStore {
     } catch { /* ignore */ }
   }
 
+  /**
+   * Create a new person, optionally attaching faces atomically.
+   * Returns the new person record on success, null on failure.
+   */
+  async createPerson(name: string, faceIds: number[] = [], photoPath?: string): Promise<PersonOption | null> {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    try {
+      const res = await firstValueFrom(
+        this.api.post<{ id: number; name: string; face_count: number }>(
+          '/persons',
+          { name: trimmed, face_ids: faceIds },
+        ),
+      );
+      const newPerson: PersonOption = { id: res.id, name: res.name, face_count: res.face_count };
+      this.persons.update(list => [newPerson, ...list]);
+      if (photoPath && faceIds.length > 0) {
+        this.photos.update(photos =>
+          photos.map(p => {
+            if (p.path !== photoPath) return p;
+            return {
+              ...p,
+              persons: [...p.persons, { id: newPerson.id, name: trimmed }],
+              unassigned_faces: Math.max(0, p.unassigned_faces - faceIds.length),
+            };
+          }),
+        );
+      }
+      return newPerson;
+    } catch {
+      return null;
+    }
+  }
+
   /** Assign a single face to a person */
   async assignFace(faceId: number, personId: number, photoPath: string, personName: string): Promise<void> {
     try {
@@ -867,8 +919,8 @@ export class GalleryStore {
       params['hide_duplicates'] = String(f.hide_duplicates);
     if (f.hide_rejected !== (defaults?.hide_rejected ?? true))
       params['hide_rejected'] = String(f.hide_rejected);
-    if (f.hide_tooltip !== (defaults?.hide_tooltip ?? false))
-      params['hide_tooltip'] = String(f.hide_tooltip);
+    if (f.tooltip_mode !== (defaults?.tooltip_mode ?? 'hover'))
+      params['tooltip_mode'] = f.tooltip_mode;
     if (f.favorites_only) params['favorites_only'] = 'true';
     if (f.is_monochrome) params['is_monochrome'] = 'true';
 
@@ -905,6 +957,9 @@ export class GalleryStore {
     if (params['hide_rejected'] !== undefined) result.hide_rejected = params['hide_rejected'] !== 'false';
     if (params['favorites_only'] !== undefined) result.favorites_only = params['favorites_only'] === 'true';
     if (params['is_monochrome'] !== undefined) result.is_monochrome = params['is_monochrome'] === 'true';
+    if (params['tooltip_mode'] && ['hover', 'click', 'off'].includes(params['tooltip_mode'])) {
+      result.tooltip_mode = params['tooltip_mode'] as TooltipMode;
+    }
     if (params['page']) result.page = parseInt(params['page'], 10) || 1;
 
     return result;

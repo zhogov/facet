@@ -1,4 +1,5 @@
 import { Component, inject, signal, computed, OnInit, effect, untracked } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterLink, Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -8,6 +9,8 @@ import {
   MAT_DIALOG_DATA,
   MatDialogRef,
 } from '@angular/material/dialog';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
@@ -71,6 +74,38 @@ export class MergeTargetDialogComponent {
 }
 
 @Component({
+  selector: 'app-new-person-dialog',
+  imports: [FormsModule, MatButtonModule, MatDialogModule, MatFormFieldModule, MatInputModule, TranslatePipe],
+  template: `
+    <h2 mat-dialog-title>{{ 'manage_persons.new_person_dialog.title' | translate }}</h2>
+    <mat-dialog-content class="!flex !flex-col gap-3 min-w-[320px]">
+      <mat-form-field subscriptSizing="dynamic" class="w-full">
+        <mat-label>{{ 'manage_persons.new_person_dialog.name_placeholder' | translate }}</mat-label>
+        <input matInput
+               [(ngModel)]="name"
+               (keydown.enter)="confirm()"
+               cdkFocusInitial />
+      </mat-form-field>
+    </mat-dialog-content>
+    <mat-dialog-actions align="end">
+      <button mat-button (click)="dialogRef.close(null)">{{ 'dialog.cancel' | translate }}</button>
+      <button mat-flat-button [disabled]="!name.trim()" (click)="confirm()">
+        {{ 'manage_persons.new_person_dialog.save' | translate }}
+      </button>
+    </mat-dialog-actions>
+  `,
+})
+export class NewPersonDialogComponent {
+  dialogRef = inject(MatDialogRef<NewPersonDialogComponent>);
+  name = '';
+
+  confirm(): void {
+    const trimmed = this.name.trim();
+    if (trimmed) this.dialogRef.close(trimmed);
+  }
+}
+
+@Component({
   selector: 'app-manage-persons',
   imports: [
     RouterLink,
@@ -89,12 +124,20 @@ export class MergeTargetDialogComponent {
       <!-- Header -->
       <div class="flex flex-wrap items-center justify-start gap-4 mb-3">
         @if (auth.isEdition()) {
-          <!-- Small screen: icon-only button -->
+          <!-- Small screen: icon-only buttons -->
+          <button mat-icon-button class="sm:!hidden" (click)="openNewPersonDialog()"
+                  [matTooltip]="'manage_persons.new_person' | translate">
+            <mat-icon>person_add</mat-icon>
+          </button>
           <a mat-icon-button class="sm:!hidden" routerLink="/merge-suggestions"
              [matTooltip]="'persons.merge_suggestions' | translate">
             <mat-icon>auto_fix_high</mat-icon>
           </a>
-          <!-- Larger screens: full button with label -->
+          <!-- Larger screens: full buttons with labels -->
+          <button mat-flat-button class="!hidden sm:!inline-flex" (click)="openNewPersonDialog()">
+            <mat-icon>person_add</mat-icon>
+            {{ 'manage_persons.new_person' | translate }}
+          </button>
           <a mat-flat-button class="!hidden sm:!inline-flex" routerLink="/merge-suggestions">
             <mat-icon>auto_fix_high</mat-icon>
             {{ 'persons.merge_suggestions' | translate }}
@@ -106,6 +149,34 @@ export class MergeTargetDialogComponent {
       @if (loading() && persons().length === 0) {
         <div class="flex justify-center py-16">
           <mat-spinner diameter="48" />
+        </div>
+      }
+
+      <!-- Needs naming section -->
+      @if (auth.isEdition() && needsNaming().length > 0) {
+        <div class="mb-6 rounded-xl border border-[var(--mat-sys-outline-variant)] bg-[var(--mat-sys-surface-container)] overflow-hidden">
+          <button
+            class="flex items-center w-full px-4 py-2 gap-2 text-left hover:bg-[var(--mat-sys-surface-container-high)] transition-colors"
+            (click)="needsNamingExpanded.set(!needsNamingExpanded())"
+          >
+            <mat-icon class="opacity-60">{{ needsNamingExpanded() ? 'expand_more' : 'chevron_right' }}</mat-icon>
+            <span class="font-medium">{{ 'manage_persons.needs_naming' | translate }} ({{ needsNaming().length }})</span>
+            <span class="text-xs opacity-60 ml-2">{{ 'manage_persons.needs_naming_help' | translate }}</span>
+          </button>
+          @if (needsNamingExpanded()) {
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4">
+              @for (p of needsNaming(); track p.id) {
+                <app-person-card
+                  [person]="p"
+                  [isEditing]="true"
+                  [canEdit]="true"
+                  (editSave)="onNeedsNamingSave($event)"
+                  (editCancel)="onNeedsNamingCancel(p.id)"
+                  (viewPhotos)="onViewPhotos($event)"
+                />
+              }
+            </div>
+          }
         </div>
       }
 
@@ -179,6 +250,8 @@ export class ManagePersonsComponent implements OnInit {
   readonly loading = signal(false);
   readonly editingId = signal<number | null>(null);
   readonly selectedIds = signal<Set<number>>(new Set());
+  readonly needsNaming = signal<Person[]>([]);
+  readonly needsNamingExpanded = signal(true);
 
   private page = 1;
   private readonly perPage = 48;
@@ -199,7 +272,68 @@ export class ManagePersonsComponent implements OnInit {
 
   async ngOnInit(): Promise<void> {
     this.initialized = true;
-    await this.loadPersons(true);
+    await Promise.all([this.loadPersons(true), this.loadNeedsNaming()]);
+  }
+
+  async loadNeedsNaming(): Promise<void> {
+    if (!this.auth.isEdition()) return;
+    try {
+      const res = await firstValueFrom(
+        this.api.get<{ persons: Person[]; total: number }>('/persons/needs_naming'),
+      );
+      this.needsNaming.set(res.persons ?? []);
+    } catch {
+      // silent — the section just won't render
+    }
+  }
+
+  async onNeedsNamingSave({ id, name }: { id: number; name: string }): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      await firstValueFrom(this.api.post(`/persons/${id}/rename`, { name: trimmed }));
+      this.needsNaming.update(list => list.filter(p => p.id !== id));
+      const named: Person = (this.needsNaming().find(p => p.id === id) ?? { id, name: trimmed, face_count: 0, face_thumbnail: false }) as Person;
+      named.name = trimmed;
+      // refresh main grid in case it overlaps with this person
+      this.persons.update(list => list.map(p => p.id === id ? { ...p, name: trimmed } : p));
+      this.snackBar.open(this.i18n.t('persons.renamed'), '', { duration: 2000 });
+    } catch {
+      this.snackBar.open(this.i18n.t('persons.rename_error'), '', { duration: 3000 });
+    }
+  }
+
+  onNeedsNamingCancel(_id: number): void {
+    // Stay in edit mode in this section; cancel just blurs the input (no-op here).
+  }
+
+  async openNewPersonDialog(): Promise<void> {
+    const ref = this.dialog.open(NewPersonDialogComponent, {
+      width: '95vw',
+      maxWidth: '420px',
+    });
+    const name: string | null = await firstValueFrom(ref.afterClosed());
+    if (!name) return;
+    try {
+      const created = await firstValueFrom(
+        this.api.post<{ id: number; name: string; face_count: number }>(
+          '/persons',
+          { name, face_ids: [] },
+        ),
+      );
+      const newPerson: Person = {
+        id: created.id,
+        name: created.name,
+        face_count: created.face_count,
+        face_thumbnail: false,
+      };
+      this.persons.update(list => [newPerson, ...list]);
+      this.total.update(t => t + 1);
+      this.editingId.set(created.id);
+      this.snackBar.open(this.i18n.t('persons.created'), '', { duration: 2000 });
+    } catch {
+      this.snackBar.open(this.i18n.t('persons.create_error'), '', { duration: 3000 });
+    }
   }
 
   async loadPersons(reset: boolean): Promise<void> {

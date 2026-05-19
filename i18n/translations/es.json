@@ -251,7 +251,15 @@
     "error_assigning_faces": "Error al asignar rostros",
     "rename_person": "Renombrar persona",
     "confirm_remove_person": "Quitar esta persona de esta foto?",
-    "remove_person_title": "Quitar persona de esta foto"
+    "remove_person_title": "Quitar persona de esta foto",
+    "new_person": "Nueva persona",
+    "needs_naming": "Por nombrar",
+    "needs_naming_help": "Personas agrupadas automáticamente con muchos rostros — nómbralas aquí",
+    "new_person_dialog": {
+      "title": "Crear nueva persona",
+      "name_placeholder": "Nombre de la persona",
+      "save": "Crear"
+    }
   },
   "compare": {
     "title": "Comparar fotos",
@@ -994,6 +1002,10 @@
     "error": "Error de inicio de sesión"
   },
   "gallery": {
+    "hidden_banner": {
+      "message": "{n} fotos ocultas por los filtros actuales",
+      "show_all": "Mostrar todas"
+    },
     "all_photos": "Todas las fotos",
     "sort": "Ordenar por",
     "sort_aggregate": "Global",
@@ -1024,7 +1036,12 @@
     "face_quality_range": "Rango de calidad facial",
     "composition_range": "Rango de composición",
     "hide_details": "Ocultar detalles",
-    "hide_tooltip": "Ocultar tooltip",
+    "tooltip_mode": {
+      "label": "Tooltip",
+      "hover": "Hover",
+      "click": "Clic",
+      "off": "Desactivado"
+    },
     "hide_blinks": "Ocultar parpadeos",
     "hide_bursts": "Mejor de ráfaga",
     "hide_duplicates": "Ocultar duplicados",
@@ -1385,7 +1402,12 @@
     "generate_link": "Generar enlace",
     "invalid_share_link": "Enlace para compartir no válido",
     "share_link_error": "Este enlace para compartir no es válido.",
-    "load_error": "No se pudo cargar la persona."
+    "load_error": "No se pudo cargar la persona.",
+    "created": "Persona creada",
+    "create_error": "No se pudo crear la persona"
+  },
+  "person_selector": {
+    "create_new": "Crear nueva persona"
   },
   "slideshow": {
     "start": "Presentacion",
@@ -1572,7 +1594,15 @@
     "threshold": "Similitud",
     "load_more": "Cargar más",
     "view_detail": "Ver detalle",
-    "cancel_pass": "Cancelar"
+    "cancel_pass": "Cancelar",
+    "lightbox": {
+      "navigate": "Navegar",
+      "keep": "Mantener",
+      "reject": "Rechazar",
+      "kept": "Mantenida",
+      "rejected": "Rechazada",
+      "undecided": "Sin decidir"
+    }
   },
   "memories": {
     "title": "En este día",

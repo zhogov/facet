@@ -251,7 +251,15 @@
     "error_assigning_faces": "Errore nell'assegnazione dei volti",
     "rename_person": "Rinomina persona",
     "confirm_remove_person": "Rimuovere questa persona da questa foto?",
-    "remove_person_title": "Rimuovi persona da questa foto"
+    "remove_person_title": "Rimuovi persona da questa foto",
+    "new_person": "Nuova persona",
+    "needs_naming": "Da nominare",
+    "needs_naming_help": "Persone raggruppate automaticamente con molti volti — nominale qui",
+    "new_person_dialog": {
+      "title": "Crea nuova persona",
+      "name_placeholder": "Nome della persona",
+      "save": "Crea"
+    }
   },
   "compare": {
     "title": "Confronta foto",
@@ -994,6 +1002,10 @@
     "error": "Accesso non riuscito"
   },
   "gallery": {
+    "hidden_banner": {
+      "message": "{n} foto nascoste dai filtri attivi",
+      "show_all": "Mostra tutte"
+    },
     "all_photos": "Tutte le foto",
     "sort": "Ordina per",
     "sort_aggregate": "Aggregato",
@@ -1024,7 +1036,12 @@
     "face_quality_range": "Intervallo qualita volto",
     "composition_range": "Intervallo composizione",
     "hide_details": "Nascondi dettagli",
-    "hide_tooltip": "Nascondi tooltip",
+    "tooltip_mode": {
+      "label": "Tooltip",
+      "hover": "Hover",
+      "click": "Clic",
+      "off": "Disattivato"
+    },
     "hide_blinks": "Nascondi occhi chiusi",
     "hide_bursts": "Migliore della raffica",
     "hide_duplicates": "Nascondi duplicati",
@@ -1385,7 +1402,12 @@
     "generate_link": "Genera link",
     "invalid_share_link": "Link di condivisione non valido",
     "share_link_error": "Questo link di condivisione non è valido.",
-    "load_error": "Impossibile caricare la persona."
+    "load_error": "Impossibile caricare la persona.",
+    "created": "Persona creata",
+    "create_error": "Impossibile creare la persona"
+  },
+  "person_selector": {
+    "create_new": "Crea nuova persona"
   },
   "slideshow": {
     "start": "Presentazione",
@@ -1572,7 +1594,15 @@
     "threshold": "Similarità",
     "load_more": "Carica altro",
     "view_detail": "Vedi dettaglio",
-    "cancel_pass": "Annulla"
+    "cancel_pass": "Annulla",
+    "lightbox": {
+      "navigate": "Naviga",
+      "keep": "Mantieni",
+      "reject": "Rifiuta",
+      "kept": "Mantenuta",
+      "rejected": "Rifiutata",
+      "undecided": "Indecisa"
+    }
   },
   "memories": {
     "title": "In questo giorno",

@@ -383,6 +383,41 @@ def api_photos(
             total_count = get_cached_count(conn, where_str, all_params, from_clause=from_clause)
             total_pages, offset = paginate(total_count, page, per_page)
 
+            any_hide_active = any(
+                params.get(k) in ('1', 'true')
+                for k in ('hide_blinks', 'hide_bursts', 'hide_duplicates', 'no_blink', 'burst_only')
+            )
+            if any_hide_active:
+                params_no_hide = dict(params)
+                for k in ('hide_blinks', 'hide_bursts', 'hide_duplicates', 'no_blink', 'burst_only'):
+                    params_no_hide[k] = ''
+                where_no_hide, params_no_hide_sql = _build_gallery_where(
+                    params_no_hide, conn, user_id=user_id,
+                )
+                all_params_no_hide = from_params + params_no_hide_sql
+                where_str_no_hide = (
+                    f" WHERE {' AND '.join(where_no_hide)}" if where_no_hide else ""
+                )
+                row = conn.execute(
+                    "SELECT "
+                    "COUNT(*) AS unhidden, "
+                    "SUM(CASE WHEN is_blink = 1 THEN 1 ELSE 0 END) AS blinks, "
+                    "SUM(CASE WHEN is_burst_lead = 0 THEN 1 ELSE 0 END) AS bursts, "
+                    "SUM(CASE WHEN is_duplicate_lead = 0 AND duplicate_group_id IS NOT NULL "
+                    "THEN 1 ELSE 0 END) AS duplicates "
+                    f"FROM {from_clause}{where_str_no_hide}",
+                    all_params_no_hide,
+                ).fetchone()
+                unhidden_total = row['unhidden'] if row else total_count
+                hidden_summary = {
+                    'total': max(0, unhidden_total - total_count),
+                    'blinks': int(row['blinks'] or 0) if row else 0,
+                    'bursts': int(row['bursts'] or 0) if row else 0,
+                    'duplicates': int(row['duplicates'] or 0) if row else 0,
+                }
+            else:
+                hidden_summary = {'total': 0, 'blinks': 0, 'bursts': 0, 'duplicates': 0}
+
             existing_cols = get_existing_columns(conn)
             pref_cols = get_preference_columns(user_id)
             pref_col_names = {'star_rating', 'is_favorite', 'is_rejected'}
@@ -427,6 +462,7 @@ def api_photos(
         'total_pages': total_pages,
         'has_more': page < total_pages,
         'sort_col': sort_col,
+        'hidden_summary': hidden_summary,
     }
 
 

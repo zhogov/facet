@@ -51,6 +51,51 @@ from utils.image_loading import RAW_EXTENSIONS, HEIF_EXTENSIONS
 # ============================================
 # EXECUTION
 # ============================================
+def _print_scan_summary(db_path, todo_list, raw_paired_skipped):
+    """Print a table of what landed in the DB from this scan.
+
+    Counts photos in `todo_list` paths that ended up in the DB and how many of
+    them are hidden by default (blinks, non-lead bursts, non-lead duplicates).
+    """
+    import sqlite3
+    if not todo_list:
+        return
+    paths = [str(f.resolve()) for f in todo_list]
+    placeholders = ",".join("?" * len(paths))
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                f"""SELECT
+                    COUNT(*) AS scored,
+                    SUM(CASE WHEN is_blink = 1 THEN 1 ELSE 0 END) AS blinks,
+                    SUM(CASE WHEN is_burst_lead = 0 THEN 1 ELSE 0 END) AS bursts_non_lead,
+                    SUM(CASE WHEN is_duplicate_lead = 0
+                              AND duplicate_group_id IS NOT NULL THEN 1 ELSE 0 END) AS duplicates_non_lead
+                FROM photos WHERE path IN ({placeholders})""",
+                paths,
+            ).fetchone()
+    except sqlite3.Error:
+        return
+    if not row:
+        return
+    scored, blinks, bursts_non_lead, duplicates_non_lead = row
+    scored = scored or 0
+    blinks = blinks or 0
+    bursts_non_lead = bursts_non_lead or 0
+    duplicates_non_lead = duplicates_non_lead or 0
+
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("Scan summary")
+    logger.info("=" * 60)
+    logger.info("%-28s %d", "Scored:", scored)
+    logger.info("%-28s %d", "Bursts (non-lead, hidden):", bursts_non_lead)
+    logger.info("%-28s %d", "Duplicates (non-lead, hidden):", duplicates_non_lead)
+    logger.info("%-28s %d", "Blinks (hidden):", blinks)
+    logger.info("%-28s %d", "RAW paired w/ JPEG (skipped):", raw_paired_skipped)
+    logger.info("=" * 60)
+
+
 def main():
     import argparse
 
@@ -1143,6 +1188,10 @@ Configuration:
     # Filter the list to only include new or un-scanned files
     todo_list = [f for f in all_files if str(f.resolve()) not in scanned_set
                  and not (f.suffix.lower() in RAW_EXTENSIONS and f.stem.lower() in jpegs_stems)]
+    raw_paired_skipped = sum(
+        1 for f in all_files
+        if f.suffix.lower() in RAW_EXTENSIONS and f.stem.lower() in jpegs_stems
+    )
 
     logger.info("Found %d total, processing %d new files.", len(all_files), len(todo_list))
 
@@ -1335,6 +1384,8 @@ Configuration:
         logger.info("Tagged %d photos with missing tags.", tagged)
     elif tagged == 0:
         logger.info("All photos already have tags.")
+
+    _print_scan_summary(scorer.db_path, todo_list, raw_paired_skipped)
 
     logger.info("All tasks complete.")
 

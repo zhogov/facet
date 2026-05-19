@@ -54,8 +54,8 @@ interface AppConfig {
       (keydown.enter)="onKeySelect($event)"
       (keydown.space)="onKeySelect($event)"
       (dblclick)="doubleClicked.emit(photo()); $event.stopPropagation()"
-      (mouseenter)="tooltipShow.emit({photo: photo(), event: $event})"
-      (mouseleave)="tooltipHide.emit()"
+      (mouseenter)="onMouseEnter($event)"
+      (mouseleave)="onMouseLeave()"
     >
       <!-- Image wrapper with hover overlay scoped to image only -->
       <div class="group/img relative"
@@ -270,17 +270,34 @@ export class PhotoCardComponent {
   // Edition mode
   readonly isEditionMode = input(false);
   readonly personFilterId = input('');
+  /** 'hover' (default) | 'click' | 'off' — drives tooltip emission strategy. */
+  readonly tooltipMode = input<'hover' | 'click' | 'off'>('hover');
 
   // Events
   readonly selectionChange = output<{ photo: Photo; event: MouseEvent }>();
 
   onSelect(event: MouseEvent): void {
     this.selectionChange.emit({ photo: this.photo(), event });
+    if (this.tooltipMode() === 'click') {
+      this.tooltipShow.emit({ photo: this.photo(), event });
+    }
   }
 
   onKeySelect(event: Event): void {
     event.preventDefault();
     this.selectionChange.emit({ photo: this.photo(), event: event as MouseEvent });
+  }
+
+  onMouseEnter(event: MouseEvent): void {
+    if (this.tooltipMode() === 'hover') {
+      this.tooltipShow.emit({ photo: this.photo(), event });
+    }
+  }
+
+  onMouseLeave(): void {
+    if (this.tooltipMode() === 'hover') {
+      this.tooltipHide.emit();
+    }
   }
   readonly tooltipShow = output<{ photo: Photo; event: MouseEvent }>();
   readonly tooltipHide = output<void>();

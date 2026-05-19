@@ -464,7 +464,7 @@ For quick reference, here are the actual defaults from the config file:
 | `viewer.defaults` | `hide_bursts` | `true` |
 | `viewer.defaults` | `hide_duplicates` | `true` |
 | `viewer.defaults` | `hide_details` | `true` |
-| `viewer.defaults` | `hide_tooltip` | `false` |
+| `viewer.defaults` | `tooltip_mode` | `"hover"` |
 | `viewer.defaults` | `gallery_mode` | `"mosaic"` |
 | `viewer.features` | `show_semantic_search` | `true` |
 | `viewer.features` | `show_albums` | `true` |

@@ -251,7 +251,15 @@
     "error_assigning_faces": "Error assigning faces",
     "rename_person": "Rename person",
     "confirm_remove_person": "Remove this person from this photo?",
-    "remove_person_title": "Remove person from this photo"
+    "remove_person_title": "Remove person from this photo",
+    "new_person": "New person",
+    "needs_naming": "Needs naming",
+    "needs_naming_help": "Auto-clustered persons with many faces — name them in place",
+    "new_person_dialog": {
+      "title": "Create new person",
+      "name_placeholder": "Person name",
+      "save": "Create"
+    }
   },
   "compare": {
     "title": "Compare Photos",
@@ -994,6 +1002,10 @@
     "error": "Login failed"
   },
   "gallery": {
+    "hidden_banner": {
+      "message": "{n} photos hidden by current filters",
+      "show_all": "Show all"
+    },
     "all_photos": "All Photos",
     "sort": "Sort by",
     "sort_aggregate": "Aggregate",
@@ -1024,7 +1036,12 @@
     "face_quality_range": "Face Quality Range",
     "composition_range": "Composition Range",
     "hide_details": "Hide Details",
-    "hide_tooltip": "Hide Tooltip",
+    "tooltip_mode": {
+      "label": "Tooltip",
+      "hover": "Hover",
+      "click": "Click",
+      "off": "Off"
+    },
     "hide_blinks": "Hide Blinks",
     "hide_bursts": "Best of Burst",
     "hide_duplicates": "Hide Duplicates",
@@ -1383,7 +1400,12 @@
     "generate_link": "Generate link",
     "invalid_share_link": "Invalid share link",
     "share_link_error": "This share link is invalid.",
-    "load_error": "Failed to load person."
+    "load_error": "Failed to load person.",
+    "created": "Person created",
+    "create_error": "Failed to create person"
+  },
+  "person_selector": {
+    "create_new": "Create new person"
   },
   "slideshow": {
     "start": "Slideshow",
@@ -1570,7 +1592,15 @@
     "threshold": "Similarity",
     "load_more": "Load more",
     "view_detail": "View detail",
-    "cancel_pass": "Cancel"
+    "cancel_pass": "Cancel",
+    "lightbox": {
+      "navigate": "Navigate",
+      "keep": "Keep",
+      "reject": "Reject",
+      "kept": "Kept",
+      "rejected": "Rejected",
+      "undecided": "Undecided"
+    }
   },
   "memories": {
     "title": "On This Day",

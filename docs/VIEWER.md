@@ -348,6 +348,12 @@ Browse photos taken on the same calendar date in previous years. A memories dial
 
 Controlled by `viewer.features.show_memories` (default: `true`).
 
+## Common workflows
+
+- **Cull a vacation** — open Capsules → look for the auto-generated `journey` capsule for the trip dates. Each capsule offers a Save-as-Album action.
+- **Walk a day-by-day review** — open Timeline → sort by aggregate → step through the year. Top shots float up first when you've enabled `hide_bursts` and `hide_duplicates` (defaults: on).
+- **Show what's hidden** — the gallery hides blinks / non-lead bursts / non-lead duplicates by default. When at least one of those filters is on and would exclude rows, a "N photos hidden by current filters · Show all" banner appears above the grid.
+
 ## Timeline View
 
 Chronological photo browser with date-based navigation. Scroll through photos organized by date with a sidebar showing available years and months.

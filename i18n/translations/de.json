@@ -255,7 +255,15 @@
     "error_assigning_faces": "Fehler beim Zuweisen der Gesichter",
     "rename_person": "Person umbenennen",
     "confirm_remove_person": "Diese Person aus diesem Foto entfernen?",
-    "remove_person_title": "Person aus diesem Foto entfernen"
+    "remove_person_title": "Person aus diesem Foto entfernen",
+    "new_person": "Neue Person",
+    "needs_naming": "Zu benennen",
+    "needs_naming_help": "Automatisch gruppierte Personen mit vielen Gesichtern — direkt benennen",
+    "new_person_dialog": {
+      "title": "Neue Person erstellen",
+      "name_placeholder": "Name der Person",
+      "save": "Erstellen"
+    }
   },
   "compare": {
     "title": "Fotos vergleichen",
@@ -998,6 +1006,10 @@
     "error": "Anmeldung fehlgeschlagen"
   },
   "gallery": {
+    "hidden_banner": {
+      "message": "{n} Fotos durch aktuelle Filter ausgeblendet",
+      "show_all": "Alle anzeigen"
+    },
     "all_photos": "Alle Fotos",
     "sort": "Sortieren nach",
     "sort_aggregate": "Gesamtwertung",
@@ -1028,7 +1040,12 @@
     "face_quality_range": "Gesichtsqualitätsbereich",
     "composition_range": "Kompositionsbereich",
     "hide_details": "Details ausblenden",
-    "hide_tooltip": "Tooltip ausblenden",
+    "tooltip_mode": {
+      "label": "Tooltip",
+      "hover": "Hover",
+      "click": "Klick",
+      "off": "Aus"
+    },
     "hide_blinks": "Blinzler ausblenden",
     "hide_bursts": "Beste aus Serie",
     "hide_duplicates": "Duplikate ausblenden",
@@ -1389,7 +1406,12 @@
     "generate_link": "Link generieren",
     "invalid_share_link": "Ungültiger Freigabelink",
     "share_link_error": "Dieser Freigabelink ist ungültig.",
-    "load_error": "Person konnte nicht geladen werden."
+    "load_error": "Person konnte nicht geladen werden.",
+    "created": "Person erstellt",
+    "create_error": "Person konnte nicht erstellt werden"
+  },
+  "person_selector": {
+    "create_new": "Neue Person erstellen"
   },
   "slideshow": {
     "start": "Diashow",
@@ -1576,7 +1598,15 @@
     "threshold": "Ähnlichkeit",
     "load_more": "Mehr laden",
     "view_detail": "Detail anzeigen",
-    "cancel_pass": "Abbrechen"
+    "cancel_pass": "Abbrechen",
+    "lightbox": {
+      "navigate": "Navigieren",
+      "keep": "Behalten",
+      "reject": "Verwerfen",
+      "kept": "Behalten",
+      "rejected": "Verworfen",
+      "undecided": "Unentschieden"
+    }
   },
   "memories": {
     "title": "An diesem Tag",

@@ -2396,6 +2396,9 @@
       "max_tags": 20,
       "min_photos_for_person": 10
     },
+    "persons": {
+      "needs_naming_min_faces": 5
+    },
     "display": {
       "tags_per_photo": 4,
       "card_width_px": 168,
@@ -2436,7 +2439,7 @@
       "hide_bursts": true,
       "hide_duplicates": true,
       "hide_details": true,
-      "hide_tooltip": false,
+      "tooltip_mode": "hover",
       "hide_rejected": true,
       "sort": "aggregate",
       "sort_direction": "DESC",

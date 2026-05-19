@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, Pipe, PipeTransform, OnDestroy, WritableSignal } from '@angular/core';
+import { Component, inject, signal, computed, Pipe, PipeTransform, OnDestroy, WritableSignal, HostListener } from '@angular/core';
 import { Router } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
@@ -138,15 +138,15 @@ interface CullingGroupsResponse {
                  [class.pointer-events-none]="(group | isConfirmed:confirmedGroups())">
               <!-- Photos -->
               <div class="flex gap-2 md:gap-3 overflow-x-auto p-3 items-center">
-                @for (photo of group.photos; track photo.path) {
-                  <div class="group/photo relative cursor-pointer rounded-lg overflow-hidden border-2 transition-colors flex-shrink-0 h-full max-w-[320px]"
+                @for (photo of group.photos; track photo.path; let pIdx = $index) {
+                  <div class="group/photo relative cursor-pointer rounded-lg overflow-hidden border-2 transition-colors flex-shrink-0 h-full max-w-[480px]"
                        [class.border-green-500]="photo.path | isKept:selectionsMap():group.group_id"
                        [class.border-red-500]="!(photo.path | isKept:selectionsMap():group.group_id) && (photo.path | isDecided:selectionsMap():group.group_id)"
                        [class.border-transparent]="!(photo.path | isDecided:selectionsMap():group.group_id)"
-                       (click)="toggleSelection(photo.path, group)"
+                       (click)="openLightbox(group, pIdx)"
                        (dblclick)="selectExclusive(photo.path, group); $event.stopPropagation()">
                     <img [src]="photo.path | thumbnailUrl:640"
-                         class="h-48 md:h-56 w-auto object-contain" [alt]="photo.filename" loading="lazy" />
+                         class="h-72 md:h-96 w-auto object-contain" [alt]="photo.filename" loading="lazy" />
                     @if (photo.path === group.best_path) {
                       <div class="absolute top-2 left-2 px-2 py-0.5 rounded bg-green-600 text-white text-xs font-bold">
                         {{ 'culling.auto_best' | translate }}
@@ -231,6 +231,52 @@ interface CullingGroupsResponse {
         </div>
       }
     </div>
+
+    <!-- Lightbox overlay -->
+    @if (lightboxGroup(); as lbGroup) {
+      <div class="fixed inset-0 z-[100] bg-black/95 flex flex-col" (click)="closeLightbox()">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-4 py-2 text-white text-sm">
+          <div class="opacity-70">
+            {{ lightboxIndex() + 1 }} / {{ lbGroup.photos.length }}
+          </div>
+          <div class="flex items-center gap-4 opacity-70 text-xs">
+            <span>← → {{ 'culling.lightbox.navigate' | translate }}</span>
+            <span>↑ {{ 'culling.lightbox.keep' | translate }}</span>
+            <span>↓ {{ 'culling.lightbox.reject' | translate }}</span>
+            <span>Space {{ 'culling.confirm' | translate }}</span>
+            <span>Esc {{ 'dialog.cancel' | translate }}</span>
+          </div>
+          <button mat-icon-button (click)="closeLightbox(); $event.stopPropagation()" class="!text-white">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+        <!-- Image -->
+        @if (lbGroup.photos[lightboxIndex()]; as lbPhoto) {
+          <div class="flex-1 flex items-center justify-center overflow-hidden" (click)="$event.stopPropagation()">
+            <img [src]="lbPhoto.path | thumbnailUrl:1920"
+                 class="max-h-full max-w-full object-contain"
+                 [alt]="lbPhoto.filename" />
+          </div>
+          <!-- Footer status -->
+          <div class="px-4 py-3 text-center" (click)="$event.stopPropagation()">
+            @if (lbPhoto.path | isKept:selectionsMap():lbGroup.group_id) {
+              <span class="inline-flex items-center gap-1 text-green-400 text-sm">
+                <mat-icon class="!text-base !w-4 !h-4 !leading-4">check</mat-icon>
+                {{ 'culling.lightbox.kept' | translate }}
+              </span>
+            } @else if (lbPhoto.path | isDecided:selectionsMap():lbGroup.group_id) {
+              <span class="inline-flex items-center gap-1 text-red-400 text-sm">
+                <mat-icon class="!text-base !w-4 !h-4 !leading-4">close</mat-icon>
+                {{ 'culling.lightbox.rejected' | translate }}
+              </span>
+            } @else {
+              <span class="text-white/40 text-sm">{{ 'culling.lightbox.undecided' | translate }}</span>
+            }
+          </div>
+        }
+      </div>
+    }
   `,
   host: { class: 'block' },
 })
@@ -268,6 +314,15 @@ export class BurstCullingComponent implements OnDestroy {
   private readonly similarSeed = Math.floor(Math.random() * 1_000_000);
 
   protected readonly hasMore = computed(() => this.currentPage() < this.totalPages());
+
+  /** Lightbox state — group being viewed, and current photo index inside it. */
+  protected readonly lightboxGroupId = signal<string | null>(null);
+  protected readonly lightboxIndex = signal(0);
+  protected readonly lightboxGroup = computed<CullingGroup | null>(() => {
+    const key = this.lightboxGroupId();
+    if (!key) return null;
+    return this.groups().find(g => this.groupKey(g) === key) ?? null;
+  });
 
   /** Groups visible in the UI (excludes hidden groups that completed pass timeout) */
   protected readonly visibleGroups = computed(() => {
@@ -385,6 +440,82 @@ export class BurstCullingComponent implements OnDestroy {
   protected openDetail(event: Event, path: string): void {
     event.stopPropagation();
     this.router.navigate(['/photo'], { queryParams: { path } });
+  }
+
+  // --- Lightbox handlers ---
+
+  protected openLightbox(group: CullingGroup, index: number): void {
+    this.lightboxGroupId.set(this.groupKey(group));
+    this.lightboxIndex.set(index);
+  }
+
+  protected closeLightbox(): void {
+    this.lightboxGroupId.set(null);
+  }
+
+  private clampIndex(value: number, max: number): number {
+    if (max <= 0) return 0;
+    return Math.max(0, Math.min(max - 1, value));
+  }
+
+  @HostListener('document:keydown.arrowleft', ['$event'])
+  protected onArrowLeft(event: Event): void {
+    const group = this.lightboxGroup();
+    if (!group) return;
+    event.preventDefault();
+    this.lightboxIndex.update(i => this.clampIndex(i - 1, group.photos.length));
+  }
+
+  @HostListener('document:keydown.arrowright', ['$event'])
+  protected onArrowRight(event: Event): void {
+    const group = this.lightboxGroup();
+    if (!group) return;
+    event.preventDefault();
+    this.lightboxIndex.update(i => this.clampIndex(i + 1, group.photos.length));
+  }
+
+  @HostListener('document:keydown.arrowup', ['$event'])
+  protected onArrowUp(event: Event): void {
+    const group = this.lightboxGroup();
+    if (!group) return;
+    event.preventDefault();
+    const photo = group.photos[this.lightboxIndex()];
+    if (!photo) return;
+    const map = new Map(this.selectionsMap());
+    const kept = new Set(map.get(group.group_id) ?? []);
+    kept.add(photo.path);
+    map.set(group.group_id, kept);
+    this.selectionsMap.set(map);
+  }
+
+  @HostListener('document:keydown.arrowdown', ['$event'])
+  protected onArrowDown(event: Event): void {
+    const group = this.lightboxGroup();
+    if (!group) return;
+    event.preventDefault();
+    const photo = group.photos[this.lightboxIndex()];
+    if (!photo) return;
+    const map = new Map(this.selectionsMap());
+    const kept = new Set(map.get(group.group_id) ?? []);
+    kept.delete(photo.path);
+    map.set(group.group_id, kept);
+    this.selectionsMap.set(map);
+  }
+
+  @HostListener('document:keydown.space', ['$event'])
+  protected onSpace(event: Event): void {
+    const group = this.lightboxGroup();
+    if (!group) return;
+    event.preventDefault();
+    void this.confirmGroup(group).then(() => this.closeLightbox());
+  }
+
+  @HostListener('document:keydown.escape', ['$event'])
+  protected onEscape(event: Event): void {
+    if (this.lightboxGroup()) {
+      event.preventDefault();
+      this.closeLightbox();
+    }
   }
 
   protected toggleSelection(path: string, group: CullingGroup): void {

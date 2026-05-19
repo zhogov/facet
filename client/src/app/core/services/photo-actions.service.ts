@@ -39,9 +39,16 @@ export class PhotoActionsService {
             width: '95vw',
             maxWidth: '400px',
           });
-          personRef.afterClosed().subscribe(async selected => {
-            if (selected) {
-              await this.store.assignFace(face.id, selected.id, photo.path, selected.name);
+          personRef.afterClosed().subscribe(async result => {
+            if (!result) return;
+            if (result.kind === 'create') {
+              const created = await this.store.createPerson(result.name, [face.id], photo.path);
+              if (created) {
+                this.snackBar.open(this.i18n.t('notifications.faces_assigned'), '', { duration: 2000 });
+                onAssigned?.();
+              }
+            } else if (result.kind === 'select') {
+              await this.store.assignFace(face.id, result.person.id, photo.path, result.person.name);
               this.snackBar.open(this.i18n.t('notifications.faces_assigned'), '', { duration: 2000 });
               onAssigned?.();
             }

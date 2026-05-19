@@ -26,21 +26,47 @@ import { TranslatePipe } from '../../shared/pipes/translate.pipe';
   template: `
     <h2 mat-dialog-title class="truncate" [matTooltip]="'manage_persons.assign_face' | translate">{{ 'manage_persons.assign_face' | translate }}</h2>
     <mat-dialog-content class="!flex !flex-col gap-3 min-w-[320px]">
-      <mat-form-field subscriptSizing="dynamic" class="w-full">
-        <mat-label>{{ 'manage_persons.search_persons' | translate }}</mat-label>
-        <mat-icon matPrefix>search</mat-icon>
-        <input matInput
-               [placeholder]="'manage_persons.search_persons' | translate"
-               [(ngModel)]="searchQuery"
-               (input)="filter()" />
-      </mat-form-field>
+      @if (creating()) {
+        <mat-form-field subscriptSizing="dynamic" class="w-full">
+          <mat-label>{{ 'manage_persons.new_person_dialog.name_placeholder' | translate }}</mat-label>
+          <input matInput
+                 [(ngModel)]="newName"
+                 (keydown.enter)="confirmCreate()"
+                 cdkFocusInitial />
+        </mat-form-field>
+        <div class="flex gap-2 justify-end">
+          <button mat-button (click)="cancelCreate()">{{ 'dialog.cancel' | translate }}</button>
+          <button mat-flat-button [disabled]="!newName.trim()" (click)="confirmCreate()">
+            {{ 'manage_persons.new_person_dialog.save' | translate }}
+          </button>
+        </div>
+      } @else {
+        <mat-form-field subscriptSizing="dynamic" class="w-full">
+          <mat-label>{{ 'manage_persons.search_persons' | translate }}</mat-label>
+          <mat-icon matPrefix>search</mat-icon>
+          <input matInput
+                 [placeholder]="'manage_persons.search_persons' | translate"
+                 [(ngModel)]="searchQuery"
+                 (input)="filter()" />
+        </mat-form-field>
 
-      @if (filtered().length) {
         <div class="flex flex-col gap-1 max-h-[360px] overflow-y-auto">
+          <button
+            class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--mat-sys-surface-container-high)] transition-colors text-left w-full border border-dashed border-neutral-600"
+            (click)="startCreate()"
+          >
+            <div class="w-14 h-14 rounded-full bg-[var(--mat-sys-surface-container-high)] flex items-center justify-center">
+              <mat-icon>person_add</mat-icon>
+            </div>
+            <div class="flex flex-col min-w-0">
+              <span class="text-base font-medium">{{ 'person_selector.create_new' | translate }}</span>
+            </div>
+          </button>
+
           @for (person of filtered(); track person.id) {
             <button
               class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--mat-sys-surface-container-high)] transition-colors text-left w-full"
-              (click)="dialogRef.close(person)"
+              (click)="dialogRef.close({ kind: 'select', person })"
             >
               <img [src]="person.id | personThumbnailUrl"
                    [alt]="person.name"
@@ -52,8 +78,6 @@ import { TranslatePipe } from '../../shared/pipes/translate.pipe';
             </button>
           }
         </div>
-      } @else {
-        <p class="text-sm text-neutral-500 text-center py-4">{{ 'manage_persons.no_named_persons' | translate }}</p>
       }
     </mat-dialog-content>
     <mat-dialog-actions align="end">
@@ -66,7 +90,9 @@ export class PersonSelectorDialogComponent {
   readonly dialogRef = inject(MatDialogRef<PersonSelectorDialogComponent>);
 
   searchQuery = '';
+  newName = '';
   readonly filtered = signal<PersonOption[]>([]);
+  readonly creating = signal(false);
 
   constructor() {
     this.filtered.set(this.data);
@@ -77,5 +103,21 @@ export class PersonSelectorDialogComponent {
     this.filtered.set(
       q ? this.data.filter(p => p.name?.toLowerCase().includes(q)) : this.data,
     );
+  }
+
+  startCreate(): void {
+    this.newName = this.searchQuery.trim();
+    this.creating.set(true);
+  }
+
+  cancelCreate(): void {
+    this.creating.set(false);
+    this.newName = '';
+  }
+
+  confirmCreate(): void {
+    const name = this.newName.trim();
+    if (!name) return;
+    this.dialogRef.close({ kind: 'create', name });
   }
 }

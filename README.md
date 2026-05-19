@@ -60,6 +60,11 @@ Multiple ways to explore your library:
 <td><img src="docs/screenshots/semantic-search.jpg" alt="Semantic search results" width="100%"></td>
 </tr></table>
 
+**Workflow tips:**
+- For chronological review across a trip or year, open **`/timeline`** — sort by aggregate to walk a day's best shots, or page month-by-month.
+- The **`/capsules`** view auto-generates curated diaporamas (journeys, "Faces of", seasonal, golden) you can save as albums.
+- The gallery hides blinks, non-lead bursts, and duplicates by default. When the **"N photos hidden by current filters"** banner appears, click "Show all" to expand the view temporarily.
+
 ### Organize
 
 - **Face recognition** — automatic face detection, grouping into persons, and blink detection. Search, rename, merge, and organize person clusters from the management UI. **Merge suggestions** find similar-looking clusters that may be the same person.

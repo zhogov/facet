@@ -24,7 +24,7 @@ describe('PhotoActionsService', () => {
   let mockDialog: { open: jest.Mock };
   let mockSnackBar: { open: jest.Mock };
   let mockI18n: { t: jest.Mock };
-  let mockStore: { config: jest.Mock; persons: jest.Mock; assignFace: jest.Mock };
+  let mockStore: { config: jest.Mock; persons: jest.Mock; assignFace: jest.Mock; createPerson: jest.Mock };
 
   beforeEach(() => {
     mockDialog = {
@@ -39,6 +39,7 @@ describe('PhotoActionsService', () => {
         { id: 2, name: null, face_count: 1 },
       ]),
       assignFace: jest.fn().mockResolvedValue(undefined),
+      createPerson: jest.fn().mockResolvedValue({ id: 99, name: 'New Person', face_count: 1 }),
     };
 
     TestBed.configureTestingModule({
@@ -91,14 +92,14 @@ describe('PhotoActionsService', () => {
 
     it('should call onAssigned callback after successful face assignment', async () => {
       const selectedFace = { id: 10 };
-      const selectedPerson = { id: 1, name: 'Alice' };
+      const selectedResult = { kind: 'select', person: { id: 1, name: 'Alice' } };
       const onAssigned = jest.fn();
 
       // Dialog 1 (face selector) returns a face
-      // Dialog 2 (person selector) returns a person
+      // Dialog 2 (person selector) returns a person-select result
       mockDialog.open
         .mockReturnValueOnce({ afterClosed: () => of(selectedFace) })
-        .mockReturnValueOnce({ afterClosed: () => of(selectedPerson) });
+        .mockReturnValueOnce({ afterClosed: () => of(selectedResult) });
 
       service.openAddPerson(mockPhoto, onAssigned);
       await Promise.resolve(); // flush face-selector import
@@ -106,6 +107,25 @@ describe('PhotoActionsService', () => {
       await Promise.resolve(); // flush afterClosed chain
 
       expect(mockStore.assignFace).toHaveBeenCalledWith(10, 1, '/photos/test.jpg', 'Alice');
+      expect(onAssigned).toHaveBeenCalled();
+    });
+
+    it('should create a new person when dialog returns kind="create"', async () => {
+      const selectedFace = { id: 10 };
+      const createResult = { kind: 'create', name: 'NewPerson' };
+      const onAssigned = jest.fn();
+
+      mockDialog.open
+        .mockReturnValueOnce({ afterClosed: () => of(selectedFace) })
+        .mockReturnValueOnce({ afterClosed: () => of(createResult) });
+
+      service.openAddPerson(mockPhoto, onAssigned);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockStore.createPerson).toHaveBeenCalledWith('NewPerson', [10], '/photos/test.jpg');
+      expect(mockStore.assignFace).not.toHaveBeenCalled();
       expect(onAssigned).toHaveBeenCalled();
     });
 
