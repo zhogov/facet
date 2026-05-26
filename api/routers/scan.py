@@ -168,10 +168,18 @@ async def scan_stream(
     async def event_generator():
         last_output_len = -1
         was_running = None
+        # Emit a comment-line heartbeat every HEARTBEAT_SECONDS so reverse
+        # proxies (nginx, Cloudflare, ingress controllers) don't close the
+        # connection on an idle scan. SSE comments (lines starting with ":")
+        # are silently dropped by EventSource clients, so heartbeats don't
+        # surface to the UI.
+        HEARTBEAT_SECONDS = 15
+        last_heartbeat = asyncio.get_event_loop().time()
         while True:
             snapshot = _build_scan_snapshot(lines)
             current_output_len = len(_scan_state['output_lines'])
             current_running = snapshot['running']
+            now = asyncio.get_event_loop().time()
             changed = current_output_len != last_output_len or current_running != was_running
             if changed:
                 yield f"data: {json.dumps(snapshot)}\n\n"
@@ -179,6 +187,10 @@ async def scan_stream(
                 if not current_running and was_running in (True, None):
                     break
                 was_running = current_running
+                last_heartbeat = now
+            elif now - last_heartbeat >= HEARTBEAT_SECONDS:
+                yield ": keepalive\n\n"
+                last_heartbeat = now
             await asyncio.sleep(1)
 
     return StreamingResponse(
