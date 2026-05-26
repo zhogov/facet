@@ -148,6 +148,44 @@ SUITES: dict[str, list[Endpoint]] = {
         ),
         Endpoint("type_counts", "GET", "/api/type_counts"),
     ],
+    "index_targets": [
+        Endpoint(
+            "favorites_only",
+            "GET",
+            "/api/photos",
+            {"page": 1, "per_page": 64, "favorites_only": 1},
+        ),
+        Endpoint(
+            "hide_rejected",
+            "GET",
+            "/api/photos",
+            {"page": 1, "per_page": 64, "hide_rejected": 1},
+        ),
+        Endpoint(
+            "show_rejected",
+            "GET",
+            "/api/photos",
+            {"page": 1, "per_page": 64, "show_rejected": 1},
+        ),
+        Endpoint(
+            "min_rating=4",
+            "GET",
+            "/api/photos",
+            {"page": 1, "per_page": 64, "min_rating": 4},
+        ),
+        Endpoint(
+            "tag=portrait",
+            "GET",
+            "/api/photos",
+            {"page": 1, "per_page": 64, "tag": "portrait"},
+        ),
+        Endpoint(
+            "tag=landscape",
+            "GET",
+            "/api/photos",
+            {"page": 1, "per_page": 64, "tag": "landscape"},
+        ),
+    ],
 }
 
 

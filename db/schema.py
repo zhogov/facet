@@ -182,6 +182,11 @@ INDEXES = [
     ('idx_star_rating', 'photos', 'star_rating'),
     ('idx_is_favorite', 'photos', 'is_favorite'),
     ('idx_is_rejected', 'photos', 'is_rejected'),
+    # Composite indexes that eliminate the temp B-tree sort step on common
+    # single-user filter+sort combos. Multi-user mode hits
+    # user_preferences instead and has its own indexes.
+    ('idx_favorite_aggregate', 'photos', 'is_favorite, aggregate DESC'),
+    ('idx_rejected_aggregate', 'photos', 'is_rejected, aggregate DESC'),
     # GPS indexes
     ('idx_gps', 'photos', 'gps_latitude, gps_longitude'),
 ]
