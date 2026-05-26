@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 
 from api.auth import CurrentUser, get_optional_user
 from api.config import VIEWER_CONFIG, is_multi_user_enabled
-from api.database import get_db
+from api.database import get_async_db, get_db
 from api.db_helpers import is_photo_tags_available, get_visibility_clause
 
 router = APIRouter(prefix="/api/filter_options", tags=["filter_options"])
@@ -27,49 +27,73 @@ def _vis_where(user: Optional[CurrentUser]):
     return f' AND {vis_sql}', vis_params
 
 
-def _cached_filter_query(cache_key, result_key, query_fn):
-    """Generic cache-then-query helper for filter option endpoints."""
+async def _cached_filter_query(cache_key, result_key, query_fn):
+    """Generic cache-then-async-query helper for filter option endpoints.
+
+    ``query_fn`` is an ``async def fn(conn)`` coroutine that returns the
+    list of rows for the dropdown.
+    """
     from db import get_cached_stat, DEFAULT_DB_PATH
     if not is_multi_user_enabled():
         data, is_fresh = get_cached_stat(DEFAULT_DB_PATH, cache_key, max_age_seconds=300)
         if data and is_fresh:
             return {result_key: data, 'cached': True}
 
-    with get_db() as conn:
-        data = query_fn(conn)
+    async with get_async_db() as conn:
+        data = await query_fn(conn)
     return {result_key: data, 'cached': False}
 
 
+async def _fetch_all(conn, sql: str, params=None):
+    cursor = await conn.execute(sql, params or [])
+    try:
+        return await cursor.fetchall()
+    finally:
+        await cursor.close()
+
+
 @router.get("/cameras")
-def cameras(user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def cameras(user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load camera options with counts."""
     vis, vp = _vis_where(user)
-    def query(conn):
-        rows = conn.execute(f"""
+
+    async def query(conn):
+        rows = await _fetch_all(
+            conn,
+            f"""
             SELECT camera_model, COUNT(*) as cnt FROM photos
             WHERE camera_model IS NOT NULL{vis}
             GROUP BY camera_model ORDER BY cnt DESC LIMIT ?
-        """, vp + [VIEWER_CONFIG['dropdowns']['max_cameras']]).fetchall()
+            """,
+            vp + [VIEWER_CONFIG['dropdowns']['max_cameras']],
+        )
         return [(r[0], r[1]) for r in rows]
-    return _cached_filter_query('cameras', 'cameras', query)
+
+    return await _cached_filter_query('cameras', 'cameras', query)
 
 
 @router.get("/lenses")
-def lenses(user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def lenses(user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load lens options with counts."""
     vis, vp = _vis_where(user)
-    def query(conn):
-        rows = conn.execute(f"""
+
+    async def query(conn):
+        rows = await _fetch_all(
+            conn,
+            f"""
             SELECT lens_model, COUNT(*) as cnt FROM photos
             WHERE lens_model IS NOT NULL{vis}
             GROUP BY lens_model ORDER BY cnt DESC LIMIT ?
-        """, vp + [VIEWER_CONFIG['dropdowns']['max_lenses']]).fetchall()
+            """,
+            vp + [VIEWER_CONFIG['dropdowns']['max_lenses']],
+        )
         return [(r[0], r[1]) for r in rows]
-    return _cached_filter_query('lenses', 'lenses', query)
+
+    return await _cached_filter_query('lenses', 'lenses', query)
 
 
 @router.get("/tags")
-def tags(user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def tags(user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load tag options with counts."""
     from db import get_cached_stat, DEFAULT_DB_PATH
 
@@ -81,18 +105,29 @@ def tags(user: Optional[CurrentUser] = Depends(get_optional_user)):
         if data and is_fresh:
             return {'tags': data[:max_tags], 'cached': True}
 
-    with get_db() as conn:
-        if is_photo_tags_available(conn):
+    async with get_async_db() as conn:
+        # `is_photo_tags_available` runs a `SELECT name FROM sqlite_master`
+        # under a sync connection; the result is stable per server lifetime
+        # so the synchronous probe is fine here.
+        photo_tags_ready = False
+        with get_db() as sync_conn:
+            photo_tags_ready = is_photo_tags_available(sync_conn)
+
+        if photo_tags_ready:
             try:
                 vis_sub = f' AND photo_path IN (SELECT path FROM photos WHERE 1=1{vis})' if vis else ''
-                rows = conn.execute(f"""
+                rows = await _fetch_all(
+                    conn,
+                    f"""
                     SELECT tag, COUNT(*) as cnt
                     FROM photo_tags
                     WHERE 1=1{vis_sub}
                     GROUP BY tag
                     ORDER BY cnt DESC, tag ASC
                     LIMIT ?
-                """, vp + [max_tags]).fetchall()
+                    """,
+                    vp + [max_tags],
+                )
                 return {'tags': [(r[0], r[1]) for r in rows], 'cached': False}
             except sqlite3.Error:
                 logger.debug("photo_tags query failed, falling back to split", exc_info=True)
@@ -113,7 +148,7 @@ def tags(user: Optional[CurrentUser] = Depends(get_optional_user)):
             LIMIT ?
         """
         try:
-            rows = conn.execute(tag_query, vp + [max_tags]).fetchall()
+            rows = await _fetch_all(conn, tag_query, vp + [max_tags])
             return {'tags': [(r[0], r[1]) for r in rows], 'cached': False}
         except sqlite3.Error:
             logger.exception("Failed to query tags")
@@ -121,36 +156,44 @@ def tags(user: Optional[CurrentUser] = Depends(get_optional_user)):
 
 
 @router.get("/persons")
-def persons(ids: Optional[str] = None, user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def persons(ids: Optional[str] = None, user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load person options with photo counts. `ids` forces specific persons to be included."""
     vis, vp = _vis_where(user)
     forced_ids = [int(i) for i in ids.split(',') if i.strip().isdigit()] if ids else []
 
-    def query(conn):
+    async def query(conn):
         try:
             min_photos = VIEWER_CONFIG['dropdowns'].get('min_photos_for_person', 1)
             vis_join = f' AND f.photo_path IN (SELECT path FROM photos WHERE 1=1{vis})' if vis else ''
-            rows = conn.execute(f"""
+            rows = await _fetch_all(
+                conn,
+                f"""
                 SELECT p.id, p.name, COUNT(DISTINCT f.photo_path) as photo_count
                 FROM persons p
                 JOIN faces f ON f.person_id = p.id
                 WHERE 1=1{vis_join}
                 GROUP BY p.id HAVING photo_count >= ?
                 ORDER BY photo_count DESC LIMIT ?
-            """, vp + [min_photos, VIEWER_CONFIG['dropdowns']['max_persons']]).fetchall()
+                """,
+                vp + [min_photos, VIEWER_CONFIG['dropdowns']['max_persons']],
+            )
             result = [(r[0], r[1], r[2]) for r in rows]
             if forced_ids:
                 present = {r[0] for r in result}
                 missing = [i for i in forced_ids if i not in present]
                 if missing:
                     placeholders = ','.join('?' * len(missing))
-                    extra = conn.execute(f"""
+                    extra = await _fetch_all(
+                        conn,
+                        f"""
                         SELECT p.id, p.name, COUNT(DISTINCT f.photo_path) as photo_count
                         FROM persons p
                         JOIN faces f ON f.person_id = p.id
                         WHERE p.id IN ({placeholders}){vis_join}
                         GROUP BY p.id
-                    """, missing + vp).fetchall()
+                        """,
+                        missing + vp,
+                    )
                     result = [(r[0], r[1], r[2]) for r in extra] + result
             return result
         except sqlite3.Error:
@@ -158,90 +201,118 @@ def persons(ids: Optional[str] = None, user: Optional[CurrentUser] = Depends(get
             return []
 
     if forced_ids:
-        # Bypass cache when forced IDs are requested to always include them
-        with get_db() as conn:
-            data = query(conn)
+        async with get_async_db() as conn:
+            data = await query(conn)
         return {'persons': data, 'cached': False}
-    return _cached_filter_query('persons', 'persons', query)
+    return await _cached_filter_query('persons', 'persons', query)
 
 
 @router.get("/patterns")
-def patterns(user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def patterns(user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load composition pattern options with counts."""
     vis, vp = _vis_where(user)
-    def query(conn):
+
+    async def query(conn):
         try:
-            rows = conn.execute(f"""
+            rows = await _fetch_all(
+                conn,
+                f"""
                 SELECT composition_pattern, COUNT(*) as cnt FROM photos
                 WHERE composition_pattern IS NOT NULL AND composition_pattern != ''{vis}
                 GROUP BY composition_pattern ORDER BY cnt DESC
-            """, vp).fetchall()
+                """,
+                vp,
+            )
             return [(r[0], r[1]) for r in rows]
         except sqlite3.Error:
             logger.exception("Failed to query composition patterns")
             return []
-    return _cached_filter_query('composition_patterns', 'patterns', query)
+
+    return await _cached_filter_query('composition_patterns', 'patterns', query)
 
 
 @router.get("/apertures")
-def apertures(user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def apertures(user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load distinct rounded aperture values with counts."""
     vis, vp = _vis_where(user)
-    def query(conn):
+
+    async def query(conn):
         try:
-            rows = conn.execute(f"""
+            rows = await _fetch_all(
+                conn,
+                f"""
                 SELECT ROUND(f_stop, 1) as ap, COUNT(*) as cnt
                 FROM photos
                 WHERE f_stop IS NOT NULL AND f_stop > 0 AND f_stop < 1000{vis}
                 GROUP BY ap ORDER BY ap ASC
-            """, vp).fetchall()
+                """,
+                vp,
+            )
             return [(r[0], r[1]) for r in rows]
         except sqlite3.Error:
             logger.exception("Failed to query apertures")
             return []
-    return _cached_filter_query('apertures', 'apertures', query)
+
+    return await _cached_filter_query('apertures', 'apertures', query)
 
 
 @router.get("/focal_lengths")
-def focal_lengths(user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def focal_lengths(user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load distinct rounded focal length values with counts."""
     vis, vp = _vis_where(user)
-    def query(conn):
+
+    async def query(conn):
         try:
-            rows = conn.execute(f"""
+            rows = await _fetch_all(
+                conn,
+                f"""
                 SELECT CAST(ROUND(focal_length) AS INTEGER) as fl, COUNT(*) as cnt
                 FROM photos
                 WHERE focal_length IS NOT NULL AND focal_length > 0{vis}
                 GROUP BY fl ORDER BY fl ASC
-            """, vp).fetchall()
+                """,
+                vp,
+            )
             return [(r[0], r[1]) for r in rows]
         except sqlite3.Error:
             logger.exception("Failed to query focal lengths")
             return []
-    return _cached_filter_query('focal_lengths', 'focal_lengths', query)
+
+    return await _cached_filter_query('focal_lengths', 'focal_lengths', query)
 
 
 @router.get("/categories")
-def categories(user: Optional[CurrentUser] = Depends(get_optional_user)):
+async def categories(user: Optional[CurrentUser] = Depends(get_optional_user)):
     """Lazy-load category options with counts."""
     vis, vp = _vis_where(user)
-    def query(conn):
+
+    async def query(conn):
         try:
-            rows = conn.execute(f"""
+            rows = await _fetch_all(
+                conn,
+                f"""
                 SELECT category, COUNT(*) as cnt FROM photos
                 WHERE category IS NOT NULL{vis}
                 GROUP BY category ORDER BY cnt DESC
-            """, vp).fetchall()
+                """,
+                vp,
+            )
             return [(r[0], r[1]) for r in rows]
         except sqlite3.Error:
             logger.exception("Failed to query categories")
             return []
-    return _cached_filter_query('categories', 'categories', query)
+
+    return await _cached_filter_query('categories', 'categories', query)
 
 
 @router.get("/location_name")
 def location_name(lat: float, lng: float):
-    """Reverse geocode coordinates to a place name, using location_names cache."""
+    """Reverse geocode coordinates to a place name, using location_names cache.
+
+    Stays sync — the underlying ``geocode_grid`` helper is sync and the
+    endpoint is per-photo (low concurrency), so async migration would only
+    add complexity for no measurable gain.
+    """
     from analyzers.capsule_generator import geocode_grid
 
     with get_db() as conn:

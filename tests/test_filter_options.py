@@ -1,7 +1,6 @@
 """Tests for /filter_options/persons endpoint — focusing on the `ids` force-include logic."""
 
 import sqlite3
-from contextlib import contextmanager
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -29,24 +28,31 @@ def _make_db(path: str, persons: list, faces: list):
     conn.close()
 
 
-def _conn_factory(db_path: str):
-    """Return a factory that opens a new thread-safe connection each call."""
-    def factory():
-        return sqlite3.connect(db_path, check_same_thread=False)
-    return factory
+def _build_app_with(db_path: str, viewer_cfg: dict):
+    """Create the FastAPI app with the test DB and config patches in place.
+
+    The filter_options router has been migrated to ``async def`` + aiosqlite,
+    so we point ``api.database.DEFAULT_DB_PATH`` at the temp file and let the
+    real async code run against it. ``_cached_filter_query`` is bypassed via
+    the ``is_multi_user_enabled=True`` branch (multi-user always skips the
+    cache lookup) so the tests do not depend on the offline ``stats_cache``
+    table being populated.
+    """
+    patches = [
+        mock.patch("api.database.DEFAULT_DB_PATH", db_path),
+        mock.patch("api.routers.filter_options.VIEWER_CONFIG", viewer_cfg),
+        mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=True),
+        mock.patch("api.db_helpers.is_multi_user_enabled", return_value=True),
+    ]
+    for p in patches:
+        p.start()
+    app = create_app()
+    return app, patches
 
 
-def _db_factory(db_path: str):
-    """Return a context-manager factory compatible with get_db()."""
-    @contextmanager
-    def factory():
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        try:
-            yield conn
-        finally:
-            conn.close()
-    return factory
-
+def _stop_patches(patches):
+    for p in patches:
+        p.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -58,21 +64,16 @@ class TestPersonsEndpoint:
         """Without ids, persons below min_photos threshold are excluded."""
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [(1, "Alice"), (2, "Bob")], [
-            *[(i, 1, f"/p1_{i}.jpg") for i in range(5)],  # Alice: 5 photos
-            (100, 2, "/p2_1.jpg"),                         # Bob: 1 photo, below threshold
+            *[(i, 1, f"/p1_{i}.jpg") for i in range(5)],
+            (100, 2, "/p2_1.jpg"),
         ])
-        conn_factory = _conn_factory(db_path)
-        app = create_app()
-        with (
-            mock.patch("api.routers.filter_options.get_db", _db_factory(db_path)),
-            mock.patch("api.routers.filter_options.VIEWER_CONFIG", {
-                "dropdowns": {"min_photos_for_person": 2, "max_persons": 100}
-            }),
-            mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=False),
-            mock.patch("api.routers.filter_options._cached_filter_query",
-                       side_effect=lambda _ck, rk, fn: {rk: fn(conn_factory()), "cached": False}),
-        ):
+        app, patches = _build_app_with(db_path, {
+            "dropdowns": {"min_photos_for_person": 2, "max_persons": 100}
+        })
+        try:
             resp = TestClient(app).get("/api/filter_options/persons")
+        finally:
+            _stop_patches(patches)
         assert resp.status_code == 200
         ids = [p[0] for p in resp.json()["persons"]]
         assert 1 in ids
@@ -83,44 +84,34 @@ class TestPersonsEndpoint:
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [(1, "Alice"), (2, None)], [
             *[(i, 1, f"/p1_{i}.jpg") for i in range(5)],
-            (100, 2, "/p2_1.jpg"),  # unnamed, 1 photo — below threshold
+            (100, 2, "/p2_1.jpg"),
         ])
-        conn_factory = _conn_factory(db_path)
-        app = create_app()
-        with (
-            mock.patch("api.routers.filter_options.get_db", _db_factory(db_path)),
-            mock.patch("api.routers.filter_options.VIEWER_CONFIG", {
-                "dropdowns": {"min_photos_for_person": 2, "max_persons": 100}
-            }),
-            mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=False),
-            mock.patch("api.routers.filter_options._cached_filter_query",
-                       side_effect=lambda _ck, rk, fn: {rk: fn(conn_factory()), "cached": False}),
-        ):
+        app, patches = _build_app_with(db_path, {
+            "dropdowns": {"min_photos_for_person": 2, "max_persons": 100}
+        })
+        try:
             resp = TestClient(app).get("/api/filter_options/persons?ids=2")
+        finally:
+            _stop_patches(patches)
         assert resp.status_code == 200
         ids = [p[0] for p in resp.json()["persons"]]
-        assert 2 in ids   # forced in despite 1 photo < threshold
-        assert 1 in ids   # Alice still present via normal query
+        assert 2 in ids
+        assert 1 in ids
 
     def test_ids_forced_person_prepended(self, tmp_path):
         """Forced person (below threshold) appears before the regular list."""
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [(1, "Alice"), (99, "Forced")], [
             *[(i, 1, f"/p1_{i}.jpg") for i in range(10)],
-            (100, 99, "/p99_1.jpg"),  # Forced: 1 photo, below threshold
+            (100, 99, "/p99_1.jpg"),
         ])
-        conn_factory = _conn_factory(db_path)
-        app = create_app()
-        with (
-            mock.patch("api.routers.filter_options.get_db", _db_factory(db_path)),
-            mock.patch("api.routers.filter_options.VIEWER_CONFIG", {
-                "dropdowns": {"min_photos_for_person": 3, "max_persons": 100}
-            }),
-            mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=False),
-            mock.patch("api.routers.filter_options._cached_filter_query",
-                       side_effect=lambda _ck, rk, fn: {rk: fn(conn_factory()), "cached": False}),
-        ):
+        app, patches = _build_app_with(db_path, {
+            "dropdowns": {"min_photos_for_person": 3, "max_persons": 100}
+        })
+        try:
             resp = TestClient(app).get("/api/filter_options/persons?ids=99")
+        finally:
+            _stop_patches(patches)
         persons = resp.json()["persons"]
         assert persons[0][0] == 99
 
@@ -128,18 +119,13 @@ class TestPersonsEndpoint:
         """A person already meeting the threshold is not duplicated when also in `ids`."""
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [(1, "Alice")], [(i, 1, f"/p_{i}.jpg") for i in range(5)])
-        conn_factory = _conn_factory(db_path)
-        app = create_app()
-        with (
-            mock.patch("api.routers.filter_options.get_db", _db_factory(db_path)),
-            mock.patch("api.routers.filter_options.VIEWER_CONFIG", {
-                "dropdowns": {"min_photos_for_person": 1, "max_persons": 100}
-            }),
-            mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=False),
-            mock.patch("api.routers.filter_options._cached_filter_query",
-                       side_effect=lambda _ck, rk, fn: {rk: fn(conn_factory()), "cached": False}),
-        ):
+        app, patches = _build_app_with(db_path, {
+            "dropdowns": {"min_photos_for_person": 1, "max_persons": 100}
+        })
+        try:
             resp = TestClient(app).get("/api/filter_options/persons?ids=1")
+        finally:
+            _stop_patches(patches)
         persons = resp.json()["persons"]
         assert len([p for p in persons if p[0] == 1]) == 1
 
@@ -147,35 +133,35 @@ class TestPersonsEndpoint:
         """Non-numeric values in `ids` are silently dropped — no 500 error."""
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [(1, "Alice")], [(i, 1, f"/p_{i}.jpg") for i in range(3)])
-        conn_factory = _conn_factory(db_path)
-        app = create_app()
-        with (
-            mock.patch("api.routers.filter_options.get_db", _db_factory(db_path)),
-            mock.patch("api.routers.filter_options.VIEWER_CONFIG", {
-                "dropdowns": {"min_photos_for_person": 1, "max_persons": 100}
-            }),
-            mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=False),
-            mock.patch("api.routers.filter_options._cached_filter_query",
-                       side_effect=lambda _ck, rk, fn: {rk: fn(conn_factory()), "cached": False}),
-        ):
+        app, patches = _build_app_with(db_path, {
+            "dropdowns": {"min_photos_for_person": 1, "max_persons": 100}
+        })
+        try:
             resp = TestClient(app).get("/api/filter_options/persons?ids=abc,1drop,;DELETE")
+        finally:
+            _stop_patches(patches)
         assert resp.status_code == 200
 
     def test_ids_bypasses_cache(self, tmp_path):
         """When `ids` is provided, _cached_filter_query is not called."""
         db_path = str(tmp_path / "test.db")
         _make_db(db_path, [(1, "Alice")], [(i, 1, f"/p_{i}.jpg") for i in range(3)])
-        _conn_factory(db_path)
-        app = create_app()
-        cache_mock = mock.MagicMock()
-        with (
-            mock.patch("api.routers.filter_options.get_db", _db_factory(db_path)),
+        cache_mock = mock.AsyncMock()
+        patches = [
+            mock.patch("api.database.DEFAULT_DB_PATH", db_path),
             mock.patch("api.routers.filter_options.VIEWER_CONFIG", {
                 "dropdowns": {"min_photos_for_person": 1, "max_persons": 100}
             }),
-            mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=False),
+            mock.patch("api.routers.filter_options.is_multi_user_enabled", return_value=True),
+            mock.patch("api.db_helpers.is_multi_user_enabled", return_value=True),
             mock.patch("api.routers.filter_options._cached_filter_query", cache_mock),
-        ):
+        ]
+        for p in patches:
+            p.start()
+        try:
+            app = create_app()
             resp = TestClient(app).get("/api/filter_options/persons?ids=1")
+        finally:
+            _stop_patches(patches)
         assert resp.status_code == 200
         cache_mock.assert_not_called()
