@@ -60,3 +60,6 @@ photos_all/
 
 # Archives
 *.zip
+
+# Benchmark results — keep dir via .gitkeep, ignore generated JSON
+bench/results/*.json
