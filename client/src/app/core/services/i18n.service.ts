@@ -7,23 +7,24 @@ export class I18nService {
   private http = inject(HttpClient);
 
   private readonly COOKIE_KEY = 'facet_lang';
-  private translations = signal<Record<string, unknown>>({});
+  private readonly _translations = signal<Record<string, unknown>>({});
 
+  readonly translations = this._translations.asReadonly();
   readonly locale = signal<string>(this.detectLocale());
-  readonly isLoaded = computed(() => Object.keys(this.translations()).length > 0);
+  readonly isLoaded = computed(() => Object.keys(this._translations()).length > 0);
 
   /** Load translations for current locale */
   async load(): Promise<void> {
     const lang = this.locale();
     try {
       const data = await firstValueFrom(this.http.get<Record<string, unknown>>(`/api/i18n/${lang}`));
-      this.translations.set(data ?? {});
+      this._translations.set(data ?? {});
     } catch {
       // Fallback to English
       if (lang !== 'en') {
         try {
           const data = await firstValueFrom(this.http.get<Record<string, unknown>>('/api/i18n/en'));
-          this.translations.set(data ?? {});
+          this._translations.set(data ?? {});
         } catch {
           // Both failed — use empty translations, keys will show as-is
         }
@@ -33,7 +34,7 @@ export class I18nService {
 
   /** Translate a key using dot notation */
   t(key: string, vars?: Record<string, string | number>): string {
-    const value = this.getNestedValue(this.translations(), key);
+    const value = this.getNestedValue(this._translations(), key);
     if (value === null || value === undefined) return key;
 
     let result = String(value);

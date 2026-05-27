@@ -4,10 +4,15 @@ import { I18nService } from '../../core/services/i18n.service';
 
 describe('TranslatePipe', () => {
   let pipe: TranslatePipe;
-  let i18nMock: { t: jest.Mock; locale: jest.Mock };
+  let i18nMock: { t: jest.Mock; translations: jest.Mock };
+  let currentTranslations: Record<string, unknown>;
 
   beforeEach(() => {
-    i18nMock = { t: jest.fn(), locale: jest.fn().mockReturnValue('en') };
+    currentTranslations = { en: true };
+    i18nMock = {
+      t: jest.fn(),
+      translations: jest.fn(() => currentTranslations),
+    };
 
     TestBed.configureTestingModule({
       providers: [
@@ -45,5 +50,36 @@ describe('TranslatePipe', () => {
 
     expect(i18nMock.t).toHaveBeenCalledWith('missing.key', undefined);
     expect(result).toBe('missing.key');
+  });
+
+  it('memoises repeated transforms for the same key+vars+translations', () => {
+    i18nMock.t.mockReturnValue('Hello');
+
+    pipe.transform('greeting');
+    pipe.transform('greeting');
+    pipe.transform('greeting');
+
+    expect(i18nMock.t).toHaveBeenCalledTimes(1);
+  });
+
+  it('recomputes when the translations object reference changes', () => {
+    i18nMock.t.mockReturnValueOnce('Hello').mockReturnValueOnce('Bonjour');
+
+    expect(pipe.transform('greeting')).toBe('Hello');
+
+    currentTranslations = { fr: true };
+
+    expect(pipe.transform('greeting')).toBe('Bonjour');
+    expect(i18nMock.t).toHaveBeenCalledTimes(2);
+  });
+
+  it('recomputes when the vars change', () => {
+    i18nMock.t
+      .mockReturnValueOnce('Hello Alice')
+      .mockReturnValueOnce('Hello Bob');
+
+    expect(pipe.transform('greeting', { name: 'Alice' })).toBe('Hello Alice');
+    expect(pipe.transform('greeting', { name: 'Bob' })).toBe('Hello Bob');
+    expect(i18nMock.t).toHaveBeenCalledTimes(2);
   });
 });
